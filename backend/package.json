@@ -1,0 +1,23 @@
+{
+  "name": "smeter-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "smeter API - tenants, property owners and prepaid meters on top of the Geni meter head-end",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
+    "lint": "node --check src/server.js",
+    "staff:create": "node --env-file-if-exists=.env scripts/create-staff.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "jose": "^6.2.12",
+    "zod": "^4.6.5"
+  }
+}

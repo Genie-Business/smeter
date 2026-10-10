@@ -1,0 +1,25 @@
+# Backend
+backend/node_modules/
+backend/data/
+backend/.env
+*.db
+*.db-wal
+*.db-shm
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+*.iml
+.claude/settings.local.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+key.properties
+
+# Gradle/Kotlin build cache
+mobile/android/.kotlin/

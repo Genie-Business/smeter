@@ -1,0 +1,227 @@
+// Client for the Geni (Calin) prepaid-meter head-end. Every endpoint is a POST
+// returning { code, reason, result }; auth is a bearer JWT from /API/User/Login.
+import { config } from '../config.js';
+import { upstream } from '../util/errors.js';
+
+export class GeniError extends Error {
+  constructor(message, { status, code, path } = {}) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.path = path;
+  }
+}
+
+function jwtExpiry(token) {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : Date.now() + 60 * 60 * 1000;
+  } catch {
+    return Date.now() + 60 * 60 * 1000;
+  }
+}
+
+const fmtDate = (d) => new Date(d).toISOString();
+
+export class GeniClient {
+  constructor(cfg = config.geni, fetchImpl = fetch) {
+    this.cfg = cfg;
+    this.fetch = fetchImpl;
+    this.token = null;
+    this.tokenExpiresAt = 0;
+    this.loggingIn = null;
+  }
+
+  async login() {
+    const res = await this.raw('/API/User/Login', {
+      userId: this.cfg.userId,
+      password: this.cfg.password,
+      company: this.cfg.company,
+    }, { auth: false });
+    const token = res?.token;
+    if (!token) throw new GeniError('Meter head-end login returned no token', { path: '/API/User/Login' });
+    this.token = token;
+    this.tokenExpiresAt = jwtExpiry(token);
+    return token;
+  }
+
+  async ensureToken() {
+    if (this.token && this.tokenExpiresAt - Date.now() > 5 * 60 * 1000) return this.token;
+    this.loggingIn ??= this.login().finally(() => {
+      this.loggingIn = null;
+    });
+    return this.loggingIn;
+  }
+
+  async raw(path, body, { auth = true, retried = false } = {}) {
+    const headers = { 'Content-Type': 'application/json', Accept: 'application/json, text/plain' };
+    if (auth) headers.Authorization = `Bearer ${await this.ensureToken()}`;
+    let response;
+    try {
+      response = await this.fetch(`${this.cfg.baseUrl}${path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.cfg.timeoutMs),
+      });
+    } catch (err) {
+      throw new GeniError(`Meter head-end unreachable: ${err.message}`, { path });
+    }
+    if (response.status === 401 && auth && !retried) {
+      this.token = null;
+      return this.raw(path, body, { auth, retried: true });
+    }
+    const text = await response.text();
+    let json;
+    try {
+      json = text ? JSON.parse(text) : {};
+    } catch {
+      throw new GeniError(`Meter head-end returned non-JSON (${response.status})`, { status: response.status, path });
+    }
+    if (!response.ok) {
+      throw new GeniError(json?.reason || `Meter head-end error ${response.status}`, { status: response.status, path });
+    }
+    const code = Number(json.code);
+    if (json.code !== undefined && !this.cfg.successCodes.includes(code)) {
+      throw new GeniError(json.reason || `Meter head-end rejected the request (code ${json.code})`, { code, path });
+    }
+    return json.result;
+  }
+
+  base(extra = {}) {
+    return { company: this.cfg.company, ...extra };
+  }
+
+  async getMeter(meterId) {
+    const result = await this.raw('/API/Meter/Read', this.base({ meterId, pageNumber: 1, pageSize: 5 }));
+    const m = (result?.data ?? []).find((row) => String(row.meterId) === String(meterId));
+    return m ? { meterId: m.meterId, isThreePhase: Boolean(m.isThreePhase), type: m.type } : null;
+  }
+
+  async getAccount(meterId) {
+    const result = await this.raw('/API/Account/Read', this.base({ meterId, pageNumber: 1, pageSize: 5 }));
+    return (result?.data ?? []).find((row) => String(row.meterId) === String(meterId)) ?? null;
+  }
+
+  async upsertCustomer({ customerId, customerName, phone, address }) {
+    const row = this.base({ customerId, customerName, phone, address, type: this.cfg.customerType, remark: 'smeter' });
+    const existing = await this.raw('/API/Customer/Read', this.base({ customerId, pageNumber: 1, pageSize: 1 }));
+    const exists = (existing?.data ?? []).some((c) => c.customerId === customerId);
+    await this.raw(exists ? '/API/Customer/Update' : '/API/Customer/Create', [row]);
+  }
+
+  async bindAccount({ customerId, meterId, region, tariffId }) {
+    const row = this.base({ customerId, meterId, region, tariffId, remark: 'smeter' });
+    const existing = await this.getAccount(meterId);
+    await this.raw(existing ? '/API/Account/Update' : '/API/Account/Create', [row]);
+  }
+
+  async upsertTariff({ tariffId, tariffName, price, tax = 0 }) {
+    const row = this.base({ tariffId, tariffName, price, tax, remark: 'smeter landlord tariff' });
+    const existing = await this.raw('/API/Tariff/Read', this.base({ tariffId, pageNumber: 1, pageSize: 1 }));
+    const exists = (existing?.data ?? []).some((t) => t.tariffId === tariffId);
+    await this.raw(exists ? '/API/Tariff/Update' : '/API/Tariff/Create', [row]);
+  }
+
+  async vendCredit({ meterId, amountNaira, serialNumber }) {
+    const r = await this.raw('/API/Token/CreditToken/Generate', this.base({
+      meterId,
+      amount: amountNaira,
+      isPreview: false,
+      isVendByTotalPaid: true,
+      authorizationPassword: this.cfg.authorizationPassword,
+      serialNumber,
+    }));
+    if (!r?.token) throw new GeniError('Token generation returned no token');
+    return {
+      receiptId: String(r.receiptId ?? ''),
+      token: String(r.token),
+      units: Number(r.totalUnit ?? 0),
+      totalPaid: Number(r.totalPaid ?? amountNaira),
+      tax: Number(r.tax ?? 0),
+    };
+  }
+
+  async pushToken({ customerId, meterId, token }) {
+    const result = await this.raw('/API/RemoteMeterTask/CreateTokenTask', [
+      this.base({ customerId, meterId, protocolId: this.cfg.tokenTaskProtocolId, data: token }),
+    ]);
+    return { taskId: extractTaskId(result) };
+  }
+
+  async control({ customerId, meterId, action }) {
+    const disconnect = action === 'disconnect';
+    const result = await this.raw('/API/RemoteMeterTask/CreateControlTask', [
+      this.base({
+        customerId,
+        meterId,
+        protocolId: disconnect ? this.cfg.disconnectProtocolId : this.cfg.reconnectProtocolId,
+        data: disconnect ? this.cfg.disconnectData : this.cfg.reconnectData,
+      }),
+    ]);
+    return { taskId: extractTaskId(result) };
+  }
+
+  async onlineStatus(meterId) {
+    const result = await this.raw('/API/GPRSOnlineStatus/View', this.base({ meterId }));
+    const row = (Array.isArray(result) ? result : [result]).find((r) => r && String(r.meterId) === String(meterId));
+    if (!row) return { online: false, lastSeen: null };
+    const online = row.isOnline === true || row.isOnline === 'true' || row.isOnline === 1;
+    return { online, lastSeen: row.statusUpdateDate ?? null };
+  }
+
+  async curve(path, { meterId, isThreePhase, from, to, maxPages = 20 }) {
+    const rows = [];
+    for (let page = 1; page <= maxPages; page++) {
+      const result = await this.raw(path, {
+        lang: 'en',
+        IsThreePhase: isThreePhase ? 1 : 0,
+        pageNumber: page,
+        pageSize: 500,
+        meterId,
+        createDateRange: [fmtDate(from), fmtDate(to)],
+        Company: this.cfg.company,
+      });
+      const data = result?.data ?? [];
+      rows.push(...data);
+      if (data.length < 500 || rows.length >= (result?.total ?? 0)) break;
+    }
+    return rows;
+  }
+
+  loadProfile(args) {
+    return this.curve('/API/LoadProfile/ElectricEnergyCurve', args);
+  }
+
+  instantaneous(args) {
+    return this.curve('/API/LoadProfile/InstantaneousValueCurve', { ...args, maxPages: 1 });
+  }
+
+  async events({ meterId, from, to }) {
+    const result = await this.raw('/API/EventNotification/Read', this.base({
+      meterId,
+      lang: 'en',
+      currentDateRange: [fmtDate(from), fmtDate(to)],
+      pageNumber: 1,
+      pageSize: 50,
+    }));
+    return (result?.data ?? []).map((e) => ({
+      at: e.currentDate ?? e.createDate,
+      code: e.eventCode,
+      content: e.eventContent,
+    }));
+  }
+}
+
+function extractTaskId(result) {
+  if (result == null) return null;
+  if (typeof result === 'number' || typeof result === 'string') return String(result);
+  if (Array.isArray(result)) return result.length ? extractTaskId(result[0]) : null;
+  return result.id != null ? String(result.id) : null;
+}
+
+/** Map head-end failures to a 502 for API callers. */
+export function asUpstream(err) {
+  if (err instanceof GeniError) return upstream(err.message, { path: err.path, code: err.code });
+  return err;
+}
