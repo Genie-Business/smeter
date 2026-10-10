@@ -13,9 +13,10 @@ let editorToken;
 
 before(async () => {
   api = await startServer();
-  db()
-    .prepare("INSERT INTO staff (email, name, password_hash, role) VALUES (?, ?, ?, 'owner')")
-    .run('ops@smeter.test', 'Ops Owner', await hashPassword('owner-password-1'));
+  await db().run(
+    "INSERT INTO staff (email, name, password_hash, role) VALUES (?, ?, ?, 'owner')",
+    'ops@smeter.test', 'Ops Owner', await hashPassword('owner-password-1'),
+  );
 });
 after(() => api.close());
 
@@ -163,6 +164,9 @@ test('image uploads are type-checked', async () => {
   const { url } = await ok.json();
   const served = await fetch(api.base + url);
   assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await served.arrayBuffer()), png); // round-trips through the database
+  assert.equal((await fetch(`${api.base}/uploads/nope.png`)).status, 404);
 
   const bad = await fetch(`${api.base}/v1/staff/uploads`, {
     method: 'POST',

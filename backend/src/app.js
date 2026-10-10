@@ -5,9 +5,10 @@ import { authRoutes } from './routes/auth.js';
 import { landlordRoutes } from './routes/landlord.js';
 import { payPages, webhookRoutes } from './routes/payments.js';
 import { publicRoutes } from './routes/public.js';
-import { staffRoutes } from './routes/staff.js';
+import { serveUpload, staffRoutes } from './routes/staff.js';
 import { supportRoutes } from './routes/support.js';
 import { tenantRoutes } from './routes/tenant.js';
+import { sweepOnce } from './services/sweeper.js';
 import { AppError } from './util/errors.js';
 
 export function createApp() {
@@ -40,9 +41,19 @@ export function createApp() {
   app.use('/v1/webhooks', webhookRoutes);
   app.use(express.json({ limit: '100kb' }));
 
-  app.get('/health', (_req, res) => {
-    db().prepare('SELECT 1').get();
+  app.get('/health', async (_req, res) => {
+    await db().get('SELECT 1');
     res.json({ ok: true, geni: config.geni.mode, payments: config.payments.provider, sms: config.sms.provider });
+  });
+
+  // Payment reconciliation for serverless hosts, called by Vercel Cron with
+  // `Authorization: Bearer $CRON_SECRET` (long-running servers use a timer).
+  app.get('/internal/sweep', async (req, res) => {
+    if (!config.cronSecret || req.get('authorization') !== `Bearer ${config.cronSecret}`) {
+      throw new AppError(401, 'unauthorized', 'Unauthorized');
+    }
+    await sweepOnce();
+    res.json({ ok: true });
   });
 
   app.use('/v1/auth', authRoutes);
@@ -53,10 +64,19 @@ export function createApp() {
   app.use('/v1/staff', staffRoutes);
   app.use('/pay', payPages);
 
-  // Images uploaded from the admin dashboard (immutable, random names).
-  app.use('/uploads', express.static(config.uploadDir, { maxAge: '30d', immutable: true, index: false }));
+  // Images uploaded from the admin dashboard (stored in the database).
+  app.get('/uploads/:name', serveUpload);
 
   // Optional static hosting for the website (the admin dashboard lives at /admin).
+  // Clean URLs: /product serves product.html, and old /product.html links redirect.
+  if (config.siteDir) {
+    app.use((req, res, next) => {
+      const m = req.method === 'GET' && req.path.match(/^(.*?)(index)?\.html$/);
+      if (!m) return next();
+      const qs = req.originalUrl.slice(req.path.length);
+      res.redirect(301, (m[2] ? m[1] || '/' : m[1]) + qs);
+    });
+  }
   if (config.siteDir) app.use('/', express.static(config.siteDir, { extensions: ['html'] }));
 
   app.use((_req, _res, next) => next(new AppError(404, 'not_found', 'Route not found')));

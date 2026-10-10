@@ -2,6 +2,7 @@
 // one checkout; the mock serves a local checkout page with the same lifecycle.
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { config } from '../config.js';
+import { db } from '../db.js';
 
 class PaystackPayments {
   name = 'paystack';
@@ -98,25 +99,31 @@ const MOCK_BANKS = [
   { name: 'Zenith Bank', code: '057' },
 ];
 
+// Outcomes live in the database (not memory) so checkout, return page and
+// polling can land on different serverless instances.
 class MockPayments {
   name = 'mock';
-  outcomes = new Map(); // reference -> { status, amountKobo }
 
   async initialize({ reference, amountKobo }) {
-    this.outcomes.set(reference, { status: 'pending', amountKobo });
+    await db().run(
+      `INSERT INTO mock_payments (reference, status, amount_kobo) VALUES (?, 'pending', ?)
+       ON CONFLICT (reference) DO NOTHING`,
+      reference, amountKobo,
+    );
     return { authorizationUrl: `${config.publicUrl}/pay/mock/${encodeURIComponent(reference)}`, accessCode: null };
   }
 
   /** Called by the mock checkout page. */
-  complete(reference, success) {
-    const o = this.outcomes.get(reference);
-    if (o) o.status = success ? 'success' : 'failed';
-    return o;
+  async complete(reference, success) {
+    await db().run(
+      `UPDATE mock_payments SET status = ? WHERE reference = ? AND status = 'pending'`,
+      success ? 'success' : 'failed', reference,
+    );
   }
 
   async verify(reference) {
-    const o = this.outcomes.get(reference);
-    return { status: o?.status ?? 'pending', amountKobo: o?.amountKobo ?? 0, transactionId: `mock-${reference}` };
+    const o = await db().get('SELECT status, amount_kobo FROM mock_payments WHERE reference = ?', reference);
+    return { status: o?.status ?? 'pending', amountKobo: o?.amount_kobo ?? 0, transactionId: `mock-${reference}` };
   }
 
   verifyWebhook() {

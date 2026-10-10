@@ -1,7 +1,8 @@
-// Boot the app against an in-memory DB with every integration mocked.
+// Boot the app against an in-memory Postgres (PGlite) with every integration mocked.
 process.env.NODE_ENV = 'test';
-process.env.DATABASE_PATH = ':memory:';
-process.env.UPLOAD_DIR = (await import('node:path')).join((await import('node:os')).tmpdir(), 'smeter-test-uploads');
+delete process.env.DATABASE_URL;
+delete process.env.POSTGRES_URL;
+process.env.PGLITE_DIR = 'memory';
 process.env.GENI_MODE = 'mock';
 process.env.PAYMENTS_PROVIDER = 'mock';
 process.env.SMS_PROVIDER = 'log';
@@ -9,11 +10,29 @@ process.env.OTP_DEBUG_ECHO = 'true';
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret';
 
 const { createApp } = await import('../src/app.js');
-const { openDb, setDb } = await import('../src/db.js');
+const { closeDb, resetDb } = await import('../src/db.js');
 const { resetRateLimits } = await import('../src/util/rateLimit.js');
 
+// TEST_DATABASE_URL runs the suite through the `pg` driver (the one used with
+// Neon) against a real Postgres server instead of in-process PGlite. It only
+// touches a throwaway `smeter_test` schema, never the app's tables.
+const testUrl = process.env.TEST_DATABASE_URL;
+const TEST_SCHEMA = 'smeter_test';
+
 export async function startServer() {
-  setDb(openDb(':memory:'));
+  if (testUrl) {
+    const { db: q } = await import('../src/db.js');
+    await resetDb({ url: testUrl });
+    await q().run(`DROP SCHEMA IF EXISTS ${TEST_SCHEMA} CASCADE`);
+    await q().run(`CREATE SCHEMA ${TEST_SCHEMA}`);
+    await closeDb();
+    await new Promise((r) => setTimeout(r, 500)); // let single-connection test servers release the socket
+    await resetDb({ url: testUrl, schema: TEST_SCHEMA });
+    const { schema } = await q().get('SELECT current_schema() AS schema');
+    if (schema !== TEST_SCHEMA) throw new Error(`Tests must run in the ${TEST_SCHEMA} schema, got ${schema}`);
+  } else {
+    await resetDb({ dir: 'memory' });
+  }
   resetRateLimits();
   const server = createApp().listen(0);
   await new Promise((r) => server.once('listening', r));
@@ -42,5 +61,14 @@ export async function startServer() {
     return { status: res.status, body: json, text, headers: res.headers };
   }
 
-  return { base, call, close: () => new Promise((r) => server.close(r)) };
+  async function close() {
+    await new Promise((r) => server.close(r));
+    if (testUrl) {
+      const { db: q } = await import('../src/db.js');
+      await q().run(`DROP SCHEMA IF EXISTS ${TEST_SCHEMA} CASCADE`);
+    }
+    await closeDb();
+  }
+
+  return { base, call, close };
 }

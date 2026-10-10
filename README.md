@@ -26,7 +26,7 @@ small, role-scoped API to the app.
 Flutter app ──HTTPS──▶ smeter API ──▶ Geni head-end (meters, tariffs, STS tokens, load profiles)
                           │      └──▶ Paystack (card / transfer / USSD checkout, settlement split)
                           │      └──▶ Termii SMS (OTP codes, tenant invites)
-                          └── SQLite (landlords, meters, purchases, OTPs, notifications, tickets)
+                          └── Postgres / Neon (landlords, meters, purchases, OTPs, notifications, tickets, content)
 ```
 
 **Buying power (SM-VEN-001, SM-PAY-001/002):** tenant picks an amount → sees the
@@ -73,10 +73,15 @@ expose.
 
 ## Website, admin dashboard and content
 
-**Website** (`website/`): Home, Product, Company and Property owners pages. Home is the
+**Website** (`website/`): Home, Product, Company and Property owners pages at clean URLs
+(`/`, `/product`, `/company`, `/owners`; old `.html` links redirect). Home opens with the
 editorial mosaic composition from the design brief (a 1280×800 canvas scaled to the
-viewport on desktop, with phone, landscape-phone and tablet layouts). The other pages
-reuse its header, type and tiles. Every “Get the app” button opens a download sheet:
+first screen on desktop, with phone, landscape-phone and tablet layouts). Below it come
+the promise, how it works, tenants, property owners, the meter render, load modes, why
+it matters, FAQ and a download band, plus a floating "Get the app" button. The other
+pages reuse its header, type and tiles. To host it on Vercel, make a project with root
+directory `website` (`website/vercel.json` turns on clean URLs). Locally, the API serves
+it with `SITE_DIR`. Every “Get the app” button opens a download sheet:
 store buttons when the URLs are set in the admin, otherwise a *coming soon — notify me*
 form. The owners page posts *Book a free site survey* leads to the API. Text, images,
 contact details and store links are fetched from `/v1/public/content/site` and
@@ -110,8 +115,14 @@ cd backend
 cp .env.example .env
 npm install
 npm run dev        # http://localhost:8080 — mock head-end, mock checkout, SMS printed to the console
-npm test           # 32 tests: pricing, curve parsing, purchase flow, manual mode, admin & content
+npm test           # 33 tests: pricing, curve parsing, purchase flow, manual mode, admin & content
 ```
+
+Data lives in Postgres. Locally, with `DATABASE_URL` blank, the API runs an embedded
+Postgres (PGlite) in `backend/data/pglite`, so there is nothing to install. Tests use a
+throwaway in-memory one. To run the suite through the real `pg` driver, set
+`TEST_DATABASE_URL` to a **non-production** database: the suite only touches a
+`smeter_test` schema, which it creates and drops.
 
 With no credentials set, everything runs against mocks:
 - **Mock head-end:** any 6–20-digit meter number exists, except numbers starting `000`. Numbers ending in `9` report offline, which exercises the manual-token path.
@@ -125,17 +136,20 @@ With no credentials set, everything runs against mocks:
 
 | Variable | Value |
 |---|---|
+| `DATABASE_URL` | Neon Postgres — use the **pooled** connection string (`…-pooler…`) |
 | `APP_ENV` | `staging` (allows mocks) or `production` (requires real Geni + Paystack) |
 | `JWT_SECRET` | 32+ random characters |
 | `CORS_ORIGINS` | The website's origin, e.g. `https://smeter.ng` (or `*`) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First admin-dashboard account |
+| `CRON_SECRET` | Random string; Vercel Cron uses it to call `/internal/sweep` |
 | `OTP_DEBUG_ECHO` | `true` on staging to see OTPs without SMS |
 
-If the config is invalid the API answers every request with `503 misconfigured` and
-the reason. **Limits on Vercel:** the SQLite file and uploads live in `/tmp`, so data
-is per-instance and is lost on cold starts, and the payment-audit sweeper doesn't
-run. That's fine for a demo; production needs a hosted database (e.g. Postgres) or a
-server with a persistent disk.
+Tables are created automatically on the first request. If the config is invalid the
+API answers every request with `503 misconfigured` and the reason. Uploaded admin
+images are stored in the database. Payment reconciliation (late webhooks, token
+retries) runs from Vercel Cron, daily on the Hobby plan. On Pro you can change the
+schedule in `vercel.json` to every few minutes. The app's status polling and the
+Paystack webhook settle payments as they happen either way.
 
 ## Going live — credentials to add
 

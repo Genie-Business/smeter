@@ -17,8 +17,9 @@
     if (mode.startsWith('tab')) html.classList.add('tab');
     if (mode.startsWith('mob')) html.classList.add('mob');
     if (mode !== 'desk' || !isLanding) return;
-    // Desktop landing: a 1280×800 composition scaled to cover the viewport.
-    const vw = innerWidth;
+    // Desktop landing: a 1280×800 composition scaled to cover the first screen
+    // (clientWidth excludes the scrollbar now that the page scrolls).
+    const vw = html.clientWidth;
     const vh = innerHeight;
     const s = vw / vh > 1280 / 800 ? vh / 800 : vw / 1280;
     html.style.setProperty('--s', s);
@@ -86,9 +87,6 @@
     html.classList.remove('intro');
 
     a(hdr, [{ transform: 'translateY(calc(-100% - 48px))' }, { transform: 'none' }], { duration: 950, easing: EXPO });
-    document.querySelectorAll('.util > *').forEach((el, i) =>
-      a(el, [{ opacity: 0 }, { opacity: 1 }], { duration: 600, delay: 320 + i * 60, easing: QUART }),
-    );
     a(document.querySelector('.logo'), [{ opacity: 0, transform: 'translateY(-10px)' }, { opacity: 1, transform: 'none' }], { duration: 800, delay: 380, easing: EXPO });
     document.querySelectorAll('.mnav > *').forEach((el, i) =>
       a(el, [{ opacity: 0, transform: 'translateY(-8px)' }, { opacity: 1, transform: 'none' }], { duration: 700, delay: 440 + i * 50, easing: EXPO }),
@@ -102,11 +100,12 @@
       a(el, [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }], { duration: 800, delay: 820 + i * 70, easing: QUINT }),
     );
     a(document.querySelector('.hero .stores'), [{ opacity: 0 }, { opacity: 1 }], { duration: 800, delay: 1000 });
+    a(document.querySelector('.hero .scroll-cue'), [{ opacity: 0 }, { opacity: 1 }], { duration: 800, delay: 1200, easing: QUART });
 
     // Visible columns: glide in, decelerating into the marquee's cruise speed,
     // then hand over to the CSS animation at HANDOFF without a jump.
     const T0 = performance.now();
-    document.querySelectorAll('.grid .col').forEach((col, i) => {
+    document.querySelectorAll('.landing-stage .grid .col').forEach((col, i) => {
       if (getComputedStyle(col).display === 'none') {
         col.style.opacity = '';
         return;
@@ -131,7 +130,28 @@
     });
   }
 
-  // ───────────── Reveal on scroll (inner pages) ─────────────
+  // ───────────── Floating "Get the app" once the first screen is gone ─────────────
+  // Hidden again at the footer, which has its own download buttons.
+  const floatCta = document.querySelector('.float-cta');
+  const top = document.querySelector('.landing-top');
+  const foot = document.querySelector('.foot');
+  if (floatCta && top && 'IntersectionObserver' in window) {
+    const seen = new Map();
+    const update = () => {
+      const on = seen.get(top) === false && seen.get(foot) !== true;
+      floatCta.classList.toggle('on', on);
+      floatCta.setAttribute('aria-hidden', String(!on));
+      floatCta.tabIndex = on ? 0 : -1;
+    };
+    const obs = new IntersectionObserver((entries) => {
+      entries.forEach((e) => seen.set(e.target, e.isIntersecting));
+      update();
+    }, { threshold: 0.15 });
+    obs.observe(top);
+    if (foot) obs.observe(foot);
+  }
+
+  // ───────────── Reveal on scroll ─────────────
   const io = 'IntersectionObserver' in window && !reduceMotion
     ? new IntersectionObserver((entries) => entries.forEach((e) => e.isIntersecting && (e.target.classList.add('in'), io.unobserve(e.target))), { rootMargin: '0px 0px -8% 0px' })
     : null;

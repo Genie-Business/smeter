@@ -34,7 +34,7 @@ supportRoutes.get('/categories', (_req, res) => {
   res.json({ categories: Object.entries(CATEGORIES).map(([id, c]) => ({ id, ...c })) });
 });
 
-supportRoutes.post('/tickets', (req, res) => {
+supportRoutes.post('/tickets', async (req, res) => {
   const body = parse(
     z.object({
       category: z.enum(Object.keys(CATEGORIES)),
@@ -48,30 +48,29 @@ supportRoutes.post('/tickets', (req, res) => {
   const meterId = role === 'tenant' ? sub : body.meterId;
   if (!meterId) throw badRequest('Select the meter this is about', { meterId: 'Required' });
   if (role === 'landlord') {
-    const owned = db()
-      .prepare("SELECT 1 FROM meters WHERE meter_id = ? AND landlord_id = ? AND status != 'removed'")
-      .get(meterId, Number(sub));
+    const owned = await db().get(
+      "SELECT 1 FROM meters WHERE meter_id = ? AND landlord_id = ? AND status != 'removed'",
+      meterId, Number(sub),
+    );
     if (!owned) throw badRequest('That meter is not on your account', { meterId: 'Unknown meter' });
   }
   const ticketRef = `SMT-${new Date().getFullYear()}-${String(randomInt(0, 1_000_000)).padStart(6, '0')}`;
   const department = CATEGORIES[body.category].department;
-  db()
-    .prepare(
-      `INSERT INTO support_tickets (ticket_ref, reporter_type, reporter_id, meter_id, category, department, description)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(ticketRef, role, String(sub), meterId, body.category, department, body.description);
+  await db().run(
+    `INSERT INTO support_tickets (ticket_ref, reporter_type, reporter_id, meter_id, category, department, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ticketRef, role, String(sub), meterId, body.category, department, body.description,
+  );
   res.status(201).json({ ticket: { ticketRef, meterId, category: body.category, department, status: 'open' } });
 });
 
-supportRoutes.get('/tickets', (req, res) => {
+supportRoutes.get('/tickets', async (req, res) => {
   const { role, sub } = req.claims;
-  const rows = db()
-    .prepare(
-      `SELECT ticket_ref, meter_id, category, department, description, status, created_at FROM support_tickets
-       WHERE reporter_type = ? AND reporter_id = ? ORDER BY id DESC LIMIT 50`,
-    )
-    .all(role, String(sub));
+  const rows = await db().all(
+    `SELECT ticket_ref, meter_id, category, department, description, status, created_at FROM support_tickets
+     WHERE reporter_type = ? AND reporter_id = ? ORDER BY id DESC LIMIT 50`,
+    role, String(sub),
+  );
   res.json({
     data: rows.map((t) => ({
       ticketRef: t.ticket_ref,

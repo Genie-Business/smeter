@@ -104,16 +104,15 @@ const pctChange = (cur, prev) => (prev > 0 ? round(((cur - prev) / prev) * 100, 
  * Manual-token meters send no readings, so "usage" is what was bought: units
  * vended per bucket, same shape as the meter-reading report.
  */
-export function purchasesReport(meter, unitPriceKobo, period = 'month', anchor = new Date()) {
+export async function purchasesReport(meter, unitPriceKobo, period = 'month', anchor = new Date()) {
   const nowTs = Date.now();
   const win = periodWindow(period, anchor);
   const prev = periodWindow(period, win.previous);
-  const rows = db()
-    .prepare(
-      `SELECT units, total_kobo, vended_at FROM purchases
-       WHERE meter_id = ? AND status = 'vended' AND vended_at >= ? AND vended_at < ?`,
-    )
-    .all(meter.meter_id, prev.start.toISOString(), win.end.toISOString());
+  const rows = await db().all(
+    `SELECT units, total_kobo, vended_at FROM purchases
+     WHERE meter_id = ? AND status = 'vended' AND vended_at >= ? AND vended_at < ?`,
+    meter.meter_id, prev.start.toISOString(), win.end.toISOString(),
+  );
   const tally = (w) => {
     const units = new Map();
     let spend = 0;
@@ -198,26 +197,24 @@ export async function usageReport(meter, unitPriceKobo, period = 'month', anchor
  * can't be reached.
  */
 /** Units and spend this calendar month (WAT), plus the latest token. */
-export function monthSummary(meter) {
+export async function monthSummary(meter) {
   const win = periodWindow('month', new Date());
-  const m = db()
-    .prepare(
-      `SELECT COALESCE(SUM(units), 0) AS units, COALESCE(SUM(total_kobo), 0) AS spend, COUNT(*) AS n
-       FROM purchases WHERE meter_id = ? AND status = 'vended' AND vended_at >= ?`,
-    )
-    .get(meter.meter_id, win.start.toISOString());
+  const m = await db().get(
+    `SELECT COALESCE(SUM(units), 0) AS units, COALESCE(SUM(total_kobo), 0) AS spend, COUNT(*) AS n
+     FROM purchases WHERE meter_id = ? AND status = 'vended' AND vended_at >= ?`,
+    meter.meter_id, win.start.toISOString(),
+  );
   return { units: round(m.units), spend: koboToNaira(m.spend), purchases: m.n };
 }
 
 export async function unitsBalance(meter) {
   if (meter.delivery_mode === 'manual') return null; // no readings to subtract
   const since = new Date(Date.now() - 90 * DAY).toISOString();
-  const row = db()
-    .prepare(
-      `SELECT COALESCE(SUM(units), 0) AS units, MIN(vended_at) AS first FROM purchases
-       WHERE meter_id = ? AND status = 'vended' AND vended_at >= ?`,
-    )
-    .get(meter.meter_id, since);
+  const row = await db().get(
+    `SELECT COALESCE(SUM(units), 0) AS units, MIN(vended_at) AS first FROM purchases
+     WHERE meter_id = ? AND status = 'vended' AND vended_at >= ?`,
+    meter.meter_id, since,
+  );
   if (!row.first) return 0;
   try {
     const rs = await readings(meter, new Date(new Date(row.first).getTime() - 2 * 60 * 60 * 1000), new Date());

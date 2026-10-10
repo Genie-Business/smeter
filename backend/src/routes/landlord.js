@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { db } from '../db.js';
+import { db, now } from '../db.js';
 import { requireLandlord } from '../auth/middleware.js';
 import { consumeOtp, issueOtp, otpEcho } from '../auth/otp.js';
 import { asUpstream } from '../geni/client.js';
@@ -19,7 +19,7 @@ import { landlordDto, meterDto } from './dto.js';
 export const landlordRoutes = Router();
 landlordRoutes.use(requireLandlord());
 
-const reload = (id) => db().prepare('SELECT * FROM landlords WHERE id = ?').get(id);
+const reload = (id) => db().get('SELECT * FROM landlords WHERE id = ?', id);
 const tariffIdFor = (landlord) => landlord.tariff_id ?? `SML${String(landlord.id).padStart(6, '0')}`;
 
 /** Make sure the landlord's tariff exists on the head-end with their price. */
@@ -27,14 +27,15 @@ async function syncTariff(landlord) {
   const tariffId = tariffIdFor(landlord);
   const price = koboToNaira(landlord.unit_price_kobo || Math.round(config.tariff.baseUnitCostNaira * 100));
   await geni().upsertTariff({ tariffId, tariffName: `${landlord.full_name} (smeter)`.slice(0, 60), price, tax: 0 });
-  if (!landlord.tariff_id) db().prepare('UPDATE landlords SET tariff_id = ? WHERE id = ?').run(tariffId, landlord.id);
+  if (!landlord.tariff_id) await db().run('UPDATE landlords SET tariff_id = ? WHERE id = ?', tariffId, landlord.id);
   return tariffId;
 }
 
-function ownedMeter(landlord, meterId) {
-  const meter = db()
-    .prepare("SELECT * FROM meters WHERE meter_id = ? AND landlord_id = ? AND status != 'removed'")
-    .get(meterId, landlord.id);
+async function ownedMeter(landlord, meterId) {
+  const meter = await db().get(
+    "SELECT * FROM meters WHERE meter_id = ? AND landlord_id = ? AND status != 'removed'",
+    meterId, landlord.id,
+  );
   if (!meter) throw notFound('Meter not found');
   return meter;
 }
@@ -45,7 +46,7 @@ landlordRoutes.get('/me', (req, res) => {
   res.json({ landlord: landlordDto(req.landlord) });
 });
 
-landlordRoutes.patch('/me', (req, res) => {
+landlordRoutes.patch('/me', async (req, res) => {
   const body = parse(
     z.object({
       fullName: z.string().trim().min(2).max(120).optional(),
@@ -53,37 +54,37 @@ landlordRoutes.patch('/me', (req, res) => {
     }),
     req.body,
   );
-  db()
-    .prepare('UPDATE landlords SET full_name = COALESCE(?, full_name), address = COALESCE(?, address) WHERE id = ?')
-    .run(body.fullName ?? null, body.address ?? null, req.landlord.id);
-  res.json({ landlord: landlordDto(reload(req.landlord.id)) });
+  await db().run(
+    'UPDATE landlords SET full_name = COALESCE(?, full_name), address = COALESCE(?, address) WHERE id = ?',
+    body.fullName ?? null, body.address ?? null, req.landlord.id,
+  );
+  res.json({ landlord: landlordDto(await reload(req.landlord.id)) });
 });
 
 // ---- Dashboard -------------------------------------------------------------
 
-landlordRoutes.get('/dashboard', (req, res) => {
+landlordRoutes.get('/dashboard', async (req, res) => {
   const id = req.landlord.id;
-  const totals = db()
-    .prepare(
+  const [totals, month, meters, recent, unread] = await Promise.all([
+    db().get(
       `SELECT COALESCE(SUM(total_kobo), 0) AS collected, COALESCE(SUM(landlord_net_kobo), 0) AS net, COUNT(*) AS count
        FROM purchases WHERE landlord_id = ? AND status = 'vended'`,
-    )
-    .get(id);
-  const month = db()
-    .prepare(
+      id,
+    ),
+    db().get(
       `SELECT COALESCE(SUM(landlord_net_kobo), 0) AS net FROM purchases
        WHERE landlord_id = ? AND status = 'vended' AND vended_at >= ?`,
-    )
-    .get(id, new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString());
-  const meters = db()
-    .prepare(
-      `SELECT COUNT(*) AS total, SUM(status = 'active') AS active, SUM(status = 'invited') AS invited
+      id, new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString(),
+    ),
+    db().get(
+      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'active') AS active,
+         COUNT(*) FILTER (WHERE status = 'invited') AS invited
        FROM meters WHERE landlord_id = ? AND status != 'removed'`,
-    )
-    .get(id);
-  const recent = db()
-    .prepare(`SELECT * FROM purchases WHERE landlord_id = ? AND status != 'abandoned' ORDER BY id DESC LIMIT 6`)
-    .all(id);
+      id,
+    ),
+    db().all(`SELECT * FROM purchases WHERE landlord_id = ? AND status != 'abandoned' ORDER BY id DESC LIMIT 6`, id),
+    unreadCount('landlord', id),
+  ]);
   res.json({
     landlord: landlordDto(req.landlord),
     earnings: koboToNaira(totals.net),
@@ -91,7 +92,7 @@ landlordRoutes.get('/dashboard', (req, res) => {
     collected: koboToNaira(totals.collected),
     purchaseCount: totals.count,
     meters: { total: meters.total, active: meters.active ?? 0, invited: meters.invited ?? 0 },
-    unreadNotifications: unreadCount('landlord', id),
+    unreadNotifications: unread,
     recent: recent.map(landlordPurchaseDto),
   });
 });
@@ -107,19 +108,17 @@ landlordRoutes.put('/tariff', async (req, res) => {
     throw badRequest(`Price can't be below the utility cost of ₦${config.tariff.baseUnitCostNaira} per kWh`);
   }
   const previous = req.landlord.unit_price_kobo;
-  db().prepare('UPDATE landlords SET unit_price_kobo = ? WHERE id = ?').run(nairaToKobo(unitPrice), req.landlord.id);
-  const landlord = reload(req.landlord.id);
+  await db().run('UPDATE landlords SET unit_price_kobo = ? WHERE id = ?', nairaToKobo(unitPrice), req.landlord.id);
+  const landlord = await reload(req.landlord.id);
   try {
     await syncTariff(landlord);
   } catch (err) {
-    db().prepare('UPDATE landlords SET unit_price_kobo = ? WHERE id = ?').run(previous, req.landlord.id);
+    await db().run('UPDATE landlords SET unit_price_kobo = ? WHERE id = ?', previous, req.landlord.id);
     throw asUpstream(err);
   }
-  const tenants = db()
-    .prepare("SELECT meter_id FROM meters WHERE landlord_id = ? AND status = 'active'")
-    .all(landlord.id);
+  const tenants = await db().all("SELECT meter_id FROM meters WHERE landlord_id = ? AND status = 'active'", landlord.id);
   for (const t of tenants) {
-    notify({
+    await notify({
       recipientType: 'tenant', recipientId: t.meter_id, kind: 'tariff',
       title: 'Unit price updated',
       body: `Power now costs ₦${unitPrice.toFixed(2)} per kWh on your meter.`,
@@ -128,10 +127,10 @@ landlordRoutes.put('/tariff', async (req, res) => {
   res.json({ landlord: landlordDto(landlord) });
 });
 
-landlordRoutes.put('/fee-bearer', (req, res) => {
+landlordRoutes.put('/fee-bearer', async (req, res) => {
   const { feeBearer } = parse(z.object({ feeBearer: z.enum(['tenant', 'landlord']) }), req.body);
-  db().prepare('UPDATE landlords SET fee_bearer = ? WHERE id = ?').run(feeBearer, req.landlord.id);
-  res.json({ landlord: landlordDto(reload(req.landlord.id)) });
+  await db().run('UPDATE landlords SET fee_bearer = ? WHERE id = ?', feeBearer, req.landlord.id);
+  res.json({ landlord: landlordDto(await reload(req.landlord.id)) });
 });
 
 // ---- Settlement bank account (SM-ONB-001) ----------------------------------
@@ -179,7 +178,7 @@ landlordRoutes.post('/bank/request', async (req, res) => {
   if (!namesMatch(req.landlord.full_name, accountName)) {
     throw badRequest(`The account name "${accountName}" doesn't match your profile name. Use an account in your name.`);
   }
-  const code = issueOtp({
+  const code = await issueOtp({
     purpose: 'bank_update',
     subject: String(req.landlord.id),
     payload: { ...body, accountName },
@@ -191,7 +190,7 @@ landlordRoutes.post('/bank/request', async (req, res) => {
 // Step 2: confirm the OTP, register the settlement account, save.
 landlordRoutes.post('/bank/confirm', async (req, res) => {
   const { code } = parse(z.object({ code: z.string().trim() }), req.body);
-  const pending = consumeOtp({ purpose: 'bank_update', subject: String(req.landlord.id), code });
+  const pending = await consumeOtp({ purpose: 'bank_update', subject: String(req.landlord.id), code });
   let settlementRef;
   try {
     ({ settlementRef } = await payments().createSettlementAccount({
@@ -202,26 +201,23 @@ landlordRoutes.post('/bank/confirm', async (req, res) => {
   } catch (err) {
     throw upstream(`Could not register the payout account: ${err.message}`);
   }
-  db()
-    .prepare(
-      `UPDATE landlords SET bank_name = ?, bank_code = ?, account_number = ?, account_name = ?,
-         bank_verified_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), settlement_ref = ? WHERE id = ?`,
-    )
-    .run(pending.bankName, pending.bankCode, pending.accountNumber, pending.accountName, settlementRef, req.landlord.id);
-  notify({
+  await db().run(
+    `UPDATE landlords SET bank_name = ?, bank_code = ?, account_number = ?, account_name = ?,
+       bank_verified_at = ?, settlement_ref = ? WHERE id = ?`,
+    pending.bankName, pending.bankCode, pending.accountNumber, pending.accountName, now(), settlementRef, req.landlord.id,
+  );
+  await notify({
     recipientType: 'landlord', recipientId: req.landlord.id, kind: 'security',
     title: 'Payout account changed',
     body: `Vending revenue now settles to ${pending.bankName} ••••${pending.accountNumber.slice(-4)}.`,
   });
-  res.json({ landlord: landlordDto(reload(req.landlord.id)) });
+  res.json({ landlord: landlordDto(await reload(req.landlord.id)) });
 });
 
 // ---- Meters / tenancy (SM-TNS-001) -----------------------------------------
 
-landlordRoutes.get('/meters', (req, res) => {
-  const meters = db()
-    .prepare("SELECT * FROM meters WHERE landlord_id = ? AND status != 'removed' ORDER BY id DESC")
-    .all(req.landlord.id);
+landlordRoutes.get('/meters', async (req, res) => {
+  const meters = await db().all("SELECT * FROM meters WHERE landlord_id = ? AND status != 'removed' ORDER BY id DESC", req.landlord.id);
   res.json({ meters: meters.map(meterDto) });
 });
 
@@ -242,7 +238,7 @@ landlordRoutes.post('/meters', async (req, res) => {
   const tenantPhone = normalizePhone(body.tenantPhone);
   if (!tenantPhone) throw badRequest("Enter the tenant's phone number", { tenantPhone: 'Invalid phone number' });
 
-  const existing = db().prepare('SELECT * FROM meters WHERE meter_id = ?').get(body.meterId);
+  const existing = await db().get('SELECT * FROM meters WHERE meter_id = ?', body.meterId);
   if (existing && existing.status !== 'removed') {
     throw conflict(
       existing.landlord_id === req.landlord.id
@@ -273,36 +269,42 @@ landlordRoutes.post('/meters', async (req, res) => {
     body.deliveryMode,
   ];
   if (existing) {
-    db()
-      .prepare(
-        `UPDATE meters SET landlord_id = ?, address = ?, apartment = ?, tenant_first_name = ?, tenant_last_name = ?,
-           tenant_phone = ?, is_three_phase = ?, customer_id = ?, debt_kobo = ?, debt_recovery_percent = ?,
-           delivery_mode = ?, tenant_email = NULL, status = 'invited', accepted_at = NULL, relay_state = 'connected'
-         WHERE meter_id = ?`,
-      )
-      .run(...values, body.meterId);
+    // Only re-claim a meter that is still removed (another owner may have raced us).
+    const r = await db().run(
+      `UPDATE meters SET landlord_id = ?, address = ?, apartment = ?, tenant_first_name = ?, tenant_last_name = ?,
+         tenant_phone = ?, is_three_phase = ?, customer_id = ?, debt_kobo = ?, debt_recovery_percent = ?,
+         delivery_mode = ?, tenant_email = NULL, status = 'invited', accepted_at = NULL, relay_state = 'connected'
+       WHERE meter_id = ? AND status = 'removed'`,
+      ...values, body.meterId,
+    );
+    if (r.changes !== 1) throw conflict('This meter is already assigned to another active tenant');
   } else {
-    db()
-      .prepare(
+    try {
+      await db().run(
         `INSERT INTO meters (landlord_id, address, apartment, tenant_first_name, tenant_last_name, tenant_phone,
            is_three_phase, customer_id, debt_kobo, debt_recovery_percent, delivery_mode, meter_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(...values, body.meterId);
+        ...values, body.meterId,
+      );
+    } catch (err) {
+      if (err.code === '23505') throw conflict('This meter is already assigned to another active tenant');
+      throw err;
+    }
   }
   await sendSms(
     tenantPhone,
     `${req.landlord.full_name} added your meter ${body.meterId} to smeter. Get the smeter app and sign in with your meter number to buy power and track usage.`,
   );
-  const meter = db().prepare('SELECT * FROM meters WHERE meter_id = ?').get(body.meterId);
+  const meter = await db().get('SELECT * FROM meters WHERE meter_id = ?', body.meterId);
   res.status(201).json({ meter: meterDto(meter) });
 });
 
 landlordRoutes.get('/meters/:meterId', async (req, res) => {
-  const meter = ownedMeter(req.landlord, req.params.meterId);
-  const purchases = db()
-    .prepare(`SELECT * FROM purchases WHERE meter_id = ? AND landlord_id = ? ORDER BY id DESC LIMIT 20`)
-    .all(meter.meter_id, req.landlord.id);
+  const meter = await ownedMeter(req.landlord, req.params.meterId);
+  const purchases = await db().all(
+    `SELECT * FROM purchases WHERE meter_id = ? AND landlord_id = ? ORDER BY id DESC LIMIT 20`,
+    meter.meter_id, req.landlord.id,
+  );
   let live = null;
   try {
     live = await liveReading(meter);
@@ -312,8 +314,8 @@ landlordRoutes.get('/meters/:meterId', async (req, res) => {
   res.json({ meter: meterDto(meter), live, purchases: purchases.map(landlordPurchaseDto) });
 });
 
-landlordRoutes.patch('/meters/:meterId', (req, res) => {
-  const meter = ownedMeter(req.landlord, req.params.meterId);
+landlordRoutes.patch('/meters/:meterId', async (req, res) => {
+  const meter = await ownedMeter(req.landlord, req.params.meterId);
   const body = parse(
     z.object({
       address: z.string().trim().min(3).max(240).optional(),
@@ -324,23 +326,20 @@ landlordRoutes.patch('/meters/:meterId', (req, res) => {
     }),
     req.body,
   );
-  db()
-    .prepare(
-      `UPDATE meters SET address = COALESCE(?, address), apartment = COALESCE(?, apartment),
-         debt_kobo = COALESCE(?, debt_kobo), debt_recovery_percent = COALESCE(?, debt_recovery_percent),
-         delivery_mode = COALESCE(?, delivery_mode)
-       WHERE id = ?`,
-    )
-    .run(
-      body.address ?? null,
-      body.apartment ?? null,
-      body.debtAmount === undefined ? null : nairaToKobo(body.debtAmount),
-      body.debtRecoveryPercent ?? null,
-      body.deliveryMode ?? null,
-      meter.id,
-    );
+  await db().run(
+    `UPDATE meters SET address = COALESCE(?, address), apartment = COALESCE(?, apartment),
+       debt_kobo = COALESCE(?, debt_kobo), debt_recovery_percent = COALESCE(?, debt_recovery_percent),
+       delivery_mode = COALESCE(?, delivery_mode)
+     WHERE id = ?`,
+    body.address ?? null,
+    body.apartment ?? null,
+    body.debtAmount === undefined ? null : nairaToKobo(body.debtAmount),
+    body.debtRecoveryPercent ?? null,
+    body.deliveryMode ?? null,
+    meter.id,
+  );
   if (body.deliveryMode && body.deliveryMode !== meter.delivery_mode) {
-    notify({
+    await notify({
       recipientType: 'tenant', recipientId: meter.meter_id, kind: 'mode',
       title: body.deliveryMode === 'manual' ? 'Tokens now load from your meter remote' : 'Tokens now load automatically',
       body: body.deliveryMode === 'manual'
@@ -348,12 +347,12 @@ landlordRoutes.patch('/meters/:meterId', (req, res) => {
         : 'Your property owner switched this meter to automatic delivery. Units will be sent to your meter after each purchase.',
     });
   }
-  res.json({ meter: meterDto(db().prepare('SELECT * FROM meters WHERE id = ?').get(meter.id)) });
+  res.json({ meter: meterDto(await db().get('SELECT * FROM meters WHERE id = ?', meter.id)) });
 });
 
-landlordRoutes.delete('/meters/:meterId', (req, res) => {
-  const meter = ownedMeter(req.landlord, req.params.meterId);
-  db().prepare("UPDATE meters SET status = 'removed' WHERE id = ?").run(meter.id);
+landlordRoutes.delete('/meters/:meterId', async (req, res) => {
+  const meter = await ownedMeter(req.landlord, req.params.meterId);
+  await db().run("UPDATE meters SET status = 'removed' WHERE id = ?", meter.id);
   res.json({ ok: true });
 });
 
@@ -361,7 +360,7 @@ landlordRoutes.delete('/meters/:meterId', (req, res) => {
 // meter's next heartbeat if it's offline.
 for (const action of ['disconnect', 'reconnect']) {
   landlordRoutes.post(`/meters/:meterId/${action}`, async (req, res) => {
-    const meter = ownedMeter(req.landlord, req.params.meterId);
+    const meter = await ownedMeter(req.landlord, req.params.meterId);
     if (meter.delivery_mode === 'manual') {
       throw conflict('This meter uses manual tokens (no GPRS link), so it can’t be switched remotely.');
     }
@@ -373,27 +372,25 @@ for (const action of ['disconnect', 'reconnect']) {
       throw asUpstream(err);
     }
     const state = action === 'disconnect' ? (online ? 'disconnected' : 'disconnect_pending') : (online ? 'connected' : 'reconnect_pending');
-    db().prepare('UPDATE meters SET relay_state = ? WHERE id = ?').run(state, meter.id);
-    notify({
+    await db().run('UPDATE meters SET relay_state = ? WHERE id = ?', state, meter.id);
+    await notify({
       recipientType: 'tenant', recipientId: meter.meter_id, kind: 'relay',
       title: action === 'disconnect' ? 'Power disconnected' : 'Power reconnected',
       body: action === 'disconnect'
         ? 'Your property owner remotely disconnected supply to this meter. Contact them for help.'
         : 'Supply to your meter has been restored.',
     });
-    res.json({ meter: meterDto(db().prepare('SELECT * FROM meters WHERE id = ?').get(meter.id)), queued: !online });
+    res.json({ meter: meterDto(await db().get('SELECT * FROM meters WHERE id = ?', meter.id)), queued: !online });
   });
 }
 
 // ---- Transactions & payments ------------------------------------------------
 
-landlordRoutes.get('/transactions', (req, res) => {
+landlordRoutes.get('/transactions', async (req, res) => {
   const { pageSize, offset, page } = pageParams(req.query);
   const where = "landlord_id = ? AND status != 'abandoned'";
-  const rows = db()
-    .prepare(`SELECT * FROM purchases WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
-    .all(req.landlord.id, pageSize, offset);
-  const { n } = db().prepare(`SELECT COUNT(*) AS n FROM purchases WHERE ${where}`).get(req.landlord.id);
+  const rows = await db().all(`SELECT * FROM purchases WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, req.landlord.id, pageSize, offset);
+  const { n } = await db().get(`SELECT COUNT(*) AS n FROM purchases WHERE ${where}`, req.landlord.id);
   res.json({ data: rows.map(landlordPurchaseDto), page, pageSize, total: n });
 });
 
@@ -407,7 +404,7 @@ landlordRoutes.post('/purchases', async (req, res) => {
     }),
     req.body,
   );
-  const meter = ownedMeter(req.landlord, body.meterId);
+  const meter = await ownedMeter(req.landlord, body.meterId);
   const result = await createPurchase({
     meter,
     landlord: req.landlord,
@@ -420,7 +417,7 @@ landlordRoutes.post('/purchases', async (req, res) => {
 });
 
 landlordRoutes.get('/purchases/:reference', async (req, res) => {
-  let p = getPurchase(req.params.reference);
+  let p = await getPurchase(req.params.reference);
   if (!p || p.landlord_id !== req.landlord.id) throw notFound('Transaction not found');
   if (p.status === 'pending' || p.status === 'paid') {
     try {
@@ -433,7 +430,7 @@ landlordRoutes.get('/purchases/:reference', async (req, res) => {
 });
 
 landlordRoutes.post('/purchases/:reference/retry', async (req, res) => {
-  const p = getPurchase(req.params.reference);
+  const p = await getPurchase(req.params.reference);
   if (!p || p.landlord_id !== req.landlord.id) throw notFound('Transaction not found');
   if (p.status !== 'paid') throw conflict('Only paid transactions awaiting a token can be retried');
   const after = await vend(p.reference);
@@ -441,19 +438,18 @@ landlordRoutes.post('/purchases/:reference/retry', async (req, res) => {
 });
 
 // Profit / markup ledger (feature 11).
-landlordRoutes.get('/ledger', (req, res) => {
+landlordRoutes.get('/ledger', async (req, res) => {
   const from = req.query.from ? new Date(String(req.query.from)) : new Date(Date.now() - 30 * 24 * 3600 * 1000);
   const to = req.query.to ? new Date(String(req.query.to)) : new Date();
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) throw badRequest('Invalid date range');
-  const rows = db()
-    .prepare(
-      `SELECT meter_id, COUNT(*) AS purchases, SUM(total_kobo) AS collected, SUM(energy_kobo) AS energy,
-         SUM(base_cost_kobo) AS base, SUM(debt_kobo) AS debt, SUM(fee_kobo) AS fees,
-         SUM(landlord_net_kobo) AS net, SUM(units) AS units
-       FROM purchases WHERE landlord_id = ? AND status = 'vended' AND vended_at BETWEEN ? AND ?
-       GROUP BY meter_id ORDER BY net DESC`,
-    )
-    .all(req.landlord.id, from.toISOString(), to.toISOString());
+  const rows = await db().all(
+    `SELECT meter_id, COUNT(*) AS purchases, SUM(total_kobo) AS collected, SUM(energy_kobo) AS energy,
+       SUM(base_cost_kobo) AS base, SUM(debt_kobo) AS debt, SUM(fee_kobo) AS fees,
+       SUM(landlord_net_kobo) AS net, SUM(units) AS units
+     FROM purchases WHERE landlord_id = ? AND status = 'vended' AND vended_at BETWEEN ? AND ?
+     GROUP BY meter_id ORDER BY net DESC`,
+    req.landlord.id, from.toISOString(), to.toISOString(),
+  );
   const line = (r) => ({
     purchases: r.purchases,
     units: Math.round((r.units ?? 0) * 100) / 100,
@@ -478,12 +474,16 @@ landlordRoutes.get('/ledger', (req, res) => {
 
 // ---- Notifications ----------------------------------------------------------
 
-landlordRoutes.get('/notifications', (req, res) => {
-  res.json({ data: listNotifications('landlord', req.landlord.id), unread: unreadCount('landlord', req.landlord.id) });
+landlordRoutes.get('/notifications', async (req, res) => {
+  const [data, unread] = await Promise.all([
+    listNotifications('landlord', req.landlord.id),
+    unreadCount('landlord', req.landlord.id),
+  ]);
+  res.json({ data, unread });
 });
 
-landlordRoutes.post('/notifications/read', (req, res) => {
-  markAllRead('landlord', req.landlord.id);
+landlordRoutes.post('/notifications/read', async (req, res) => {
+  await markAllRead('landlord', req.landlord.id);
   res.json({ ok: true });
 });
 

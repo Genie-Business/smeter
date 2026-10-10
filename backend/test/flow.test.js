@@ -176,9 +176,11 @@ test('declined payment is marked failed and not vended', async () => {
 test('sweeper reconciles a payment whose webhook never arrived', async () => {
   const p = await api.call('POST', '/v1/tenant/purchases', { token: tenantToken, body: { amount: 1500 } });
   const { payments } = await import('../src/providers/payments.js');
-  payments().complete(p.body.reference, true); // paid at the gateway, no webhook
-  db().prepare('UPDATE purchases SET created_at = ? WHERE reference = ?')
-    .run(new Date(Date.now() - 10 * 60 * 1000).toISOString(), p.body.reference);
+  await payments().complete(p.body.reference, true); // paid at the gateway, no webhook
+  await db().run(
+    'UPDATE purchases SET created_at = ? WHERE reference = ?',
+    new Date(Date.now() - 10 * 60 * 1000).toISOString(), p.body.reference,
+  );
   await sweepOnce();
   const r = await api.call('GET', `/v1/tenant/purchases/${p.body.reference}`, { token: tenantToken });
   assert.equal(r.body.purchase.status, 'vended');

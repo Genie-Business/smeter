@@ -11,8 +11,8 @@ export const publicRoutes = Router();
 
 // Website + app copy (defaults merged with admin edits). Short cache so edits
 // show up within a minute without hammering the API.
-publicRoutes.get('/content/:key', (req, res) => {
-  const { data, version, updatedAt } = getContent(req.params.key);
+publicRoutes.get('/content/:key', async (req, res) => {
+  const { data, version, updatedAt } = await getContent(req.params.key);
   res.set('Cache-Control', 'public, max-age=60');
   res.json({ data, version, updatedAt });
 });
@@ -20,7 +20,7 @@ publicRoutes.get('/content/:key', (req, res) => {
 const leadLimiter = rateLimit({ key: 'lead', limit: 6, windowMs: 60 * 60 * 1000 });
 
 // "Book a free site survey" on the property-owner onboarding page.
-publicRoutes.post('/owner-leads', leadLimiter, (req, res) => {
+publicRoutes.post('/owner-leads', leadLimiter, async (req, res) => {
   const body = parse(
     z.object({
       fullName: z.string().trim().min(2, 'Enter your name').max(120),
@@ -39,18 +39,17 @@ publicRoutes.post('/owner-leads', leadLimiter, (req, res) => {
   if (!phone) {
     return res.status(400).json({ error: { code: 'bad_request', message: 'Enter a valid phone number', details: { phone: 'Invalid' } } });
   }
-  db()
-    .prepare(
-      `INSERT INTO owner_leads (full_name, phone, email, city, property_type, units, message) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(body.fullName, phone, body.email || null, body.city ?? null, body.propertyType ?? null, body.units ?? null, body.message ?? null);
+  await db().run(
+    `INSERT INTO owner_leads (full_name, phone, email, city, property_type, units, message) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    body.fullName, phone, body.email || null, body.city ?? null, body.propertyType ?? null, body.units ?? null, body.message ?? null,
+  );
   res.status(201).json({ ok: true });
 });
 
 const notifyLimiter = rateLimit({ key: 'notify', limit: 10, windowMs: 60 * 60 * 1000 });
 
 // "Tell me when the app is in the stores."
-publicRoutes.post('/notify', notifyLimiter, (req, res) => {
+publicRoutes.post('/notify', notifyLimiter, async (req, res) => {
   const body = parse(
     z.object({
       contact: z.string().trim().min(5, 'Enter a phone number or email').max(120),
@@ -64,6 +63,9 @@ publicRoutes.post('/notify', notifyLimiter, (req, res) => {
   if (!contact) {
     return res.status(400).json({ error: { code: 'bad_request', message: 'Enter a valid phone number or email' } });
   }
-  db().prepare('INSERT OR IGNORE INTO notify_requests (contact, platform) VALUES (?, ?)').run(contact, body.platform);
+  await db().run(
+    'INSERT INTO notify_requests (contact, platform) VALUES (?, ?) ON CONFLICT (contact, platform) DO NOTHING',
+    contact, body.platform,
+  );
   res.status(201).json({ ok: true });
 });

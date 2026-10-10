@@ -11,7 +11,7 @@ import { koboToNaira } from '../util/http.js';
 export const webhookRoutes = Router();
 
 // Raw body is required to check the HMAC signature byte-for-byte.
-webhookRoutes.post('/paystack', express.raw({ type: '*/*', limit: '1mb' }), (req, res) => {
+webhookRoutes.post('/paystack', express.raw({ type: '*/*', limit: '1mb' }), async (req, res) => {
   const provider = payments();
   if (provider.name !== 'paystack' || !provider.verifyWebhook(req.body, req.get('x-paystack-signature'))) {
     return res.status(401).json({ error: { code: 'invalid_signature', message: 'Invalid signature' } });
@@ -22,18 +22,25 @@ webhookRoutes.post('/paystack', express.raw({ type: '*/*', limit: '1mb' }), (req
   } catch {
     return res.status(400).end();
   }
-  // Acknowledge immediately; processing is idempotent and the sweeper retries.
+  // Settle before acknowledging: serverless hosts may freeze the function once
+  // the response is sent. Processing is idempotent; on failure the event is
+  // forgotten so Paystack's retry (or the sweeper) picks it up again.
+  if (event?.event === 'charge.success' && event.data?.reference) {
+    const eventId = `paystack:${event.data.id ?? event.data.reference}`;
+    const seen = await db().run(
+      'INSERT INTO webhook_events (id, provider, event) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING',
+      eventId, 'paystack', event.event,
+    );
+    if (seen.changes === 1) {
+      try {
+        await settlePayment(String(event.data.reference), { source: 'webhook' });
+      } catch (err) {
+        console.error('[webhook] settle failed', event.data.reference, err.message);
+        await db().run('DELETE FROM webhook_events WHERE id = ?', eventId);
+      }
+    }
+  }
   res.status(200).json({ received: true });
-
-  if (event?.event !== 'charge.success' || !event.data?.reference) return;
-  const eventId = `paystack:${event.data.id ?? event.data.reference}`;
-  const seen = db()
-    .prepare('INSERT OR IGNORE INTO webhook_events (id, provider, event) VALUES (?, ?, ?)')
-    .run(eventId, 'paystack', event.event);
-  if (seen.changes === 0) return; // duplicate delivery
-  settlePayment(String(event.data.reference), { source: 'webhook' }).catch((err) =>
-    console.error('[webhook] settle failed', event.data.reference, err.message),
-  );
 });
 
 export const payPages = Router();
@@ -76,9 +83,9 @@ payPages.get('/return', async (req, res) => {
 
 // ---- Mock checkout (only when PAYMENTS_PROVIDER=mock) -----------------------
 
-payPages.get('/mock/:reference', (req, res) => {
+payPages.get('/mock/:reference', async (req, res) => {
   if (payments().name !== 'mock') throw notFound();
-  const p = getPurchase(req.params.reference);
+  const p = await getPurchase(req.params.reference);
   if (!p) throw notFound('Unknown payment');
   const amount = koboToNaira(p.total_kobo).toLocaleString('en-NG', { minimumFractionDigits: 2 });
   const action = `/pay/mock/${encodeURIComponent(p.reference)}`;
@@ -95,7 +102,7 @@ payPages.post('/mock/:reference', express.urlencoded({ extended: false }), async
   const provider = payments();
   if (provider.name !== 'mock') throw notFound();
   const reference = req.params.reference;
-  if (!getPurchase(reference)) throw notFound('Unknown payment');
-  provider.complete(reference, req.body?.outcome === 'success');
+  if (!(await getPurchase(reference))) throw notFound('Unknown payment');
+  await provider.complete(reference, req.body?.outcome === 'success');
   res.redirect(303, `/pay/return?reference=${encodeURIComponent(reference)}`);
 });

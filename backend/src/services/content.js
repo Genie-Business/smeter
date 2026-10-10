@@ -5,7 +5,7 @@
 // and image fields must be site-relative or http(s). Readers get the defaults
 // deep-merged with the saved overrides, so new default fields appear
 // automatically after a deploy.
-import { db, now } from '../db.js';
+import { db, now, tx } from '../db.js';
 import { CONTENT_DEFAULTS } from '../content/defaults.js';
 import { badRequest, notFound } from '../util/errors.js';
 
@@ -62,9 +62,9 @@ function assertKey(key) {
   if (!CONTENT_KEYS.includes(key)) throw notFound('Unknown content');
 }
 
-export function getContent(key) {
+export async function getContent(key) {
   assertKey(key);
-  const row = db().prepare('SELECT data, version, updated_at FROM content WHERE key = ?').get(key);
+  const row = await db().get('SELECT data, version, updated_at FROM content WHERE key = ?', key);
   const overrides = row ? JSON.parse(row.data) : {};
   return {
     data: deepMerge(CONTENT_DEFAULTS[key], overrides),
@@ -73,52 +73,54 @@ export function getContent(key) {
   };
 }
 
+const conflictError = () =>
+  Object.assign(badRequest('Someone else saved this content since you opened it. Reload to see their changes.'), {
+    status: 409,
+    code: 'conflict',
+  });
+
 /**
  * Save a full document. `expectedVersion` guards against two editors
  * overwriting each other.
  */
-export function saveContent(key, data, staffId, expectedVersion) {
+export async function saveContent(key, data, staffId, expectedVersion) {
   assertKey(key);
   const clean = sanitize(CONTENT_DEFAULTS[key], data, '', false);
   const json = JSON.stringify(clean);
   if (json.length > 256 * 1024) throw badRequest('Content is too large');
-  const current = db().prepare('SELECT version FROM content WHERE key = ?').get(key);
-  const version = current?.version ?? 0;
-  if (expectedVersion !== undefined && expectedVersion !== version) {
-    throw Object.assign(badRequest('Someone else saved this content since you opened it. Reload to see their changes.'), {
-      status: 409,
-      code: 'conflict',
-    });
-  }
-  const next = version + 1;
-  db()
-    .prepare(
+  await tx(async () => {
+    // Lock the row (if any) so concurrent saves serialise.
+    const current = await db().get('SELECT version FROM content WHERE key = ? FOR UPDATE', key);
+    const version = current?.version ?? 0;
+    if (expectedVersion !== undefined && expectedVersion !== version) throw conflictError();
+    const next = version + 1;
+    const saved = await db().run(
       `INSERT INTO content (key, data, version, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
-       ON CONFLICT(key) DO UPDATE SET data = excluded.data, version = excluded.version,
-         updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
-    )
-    .run(key, json, next, staffId, now());
-  db()
-    .prepare('INSERT INTO content_history (key, version, data, updated_by) VALUES (?, ?, ?, ?)')
-    .run(key, next, json, staffId);
+       ON CONFLICT (key) DO UPDATE SET data = excluded.data, version = excluded.version,
+         updated_by = excluded.updated_by, updated_at = excluded.updated_at
+       WHERE content.version = ?`,
+      key, json, next, staffId, now(), version,
+    );
+    if (saved.changes !== 1) throw conflictError();
+    await db().run('INSERT INTO content_history (key, version, data, updated_by) VALUES (?, ?, ?, ?)', key, next, json, staffId);
+  });
   return getContent(key);
 }
 
-export function contentHistory(key, limit = 20) {
+export async function contentHistory(key, limit = 20) {
   assertKey(key);
-  return db()
-    .prepare(
-      `SELECT h.version, h.created_at, s.name AS by_name FROM content_history h
-       LEFT JOIN staff s ON s.id = h.updated_by WHERE h.key = ? ORDER BY h.version DESC LIMIT ?`,
-    )
-    .all(key, limit)
-    .map((r) => ({ version: r.version, savedAt: r.created_at, by: r.by_name }));
+  const rows = await db().all(
+    `SELECT h.version, h.created_at, s.name AS by_name FROM content_history h
+     LEFT JOIN staff s ON s.id = h.updated_by WHERE h.key = ? ORDER BY h.version DESC LIMIT ?`,
+    key, limit,
+  );
+  return rows.map((r) => ({ version: r.version, savedAt: r.created_at, by: r.by_name }));
 }
 
 /** Restore an old version by saving it again as the newest version. */
-export function restoreContent(key, version, staffId) {
+export async function restoreContent(key, version, staffId) {
   assertKey(key);
-  const row = db().prepare('SELECT data FROM content_history WHERE key = ? AND version = ?').get(key, version);
+  const row = await db().get('SELECT data FROM content_history WHERE key = ? AND version = ?', key, version);
   if (!row) throw notFound('That version no longer exists');
   return saveContent(key, JSON.parse(row.data), staffId);
 }

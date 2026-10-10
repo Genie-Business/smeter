@@ -427,7 +427,7 @@ async function leadsList(main, _x, state = { page: 1 }) {
   const statuses = ['new', 'contacted', 'surveyed', 'onboarded', 'closed'];
   render(main, html`
     <div class="page-head"><div><h1>Owner leads</h1><p>Site-survey requests from the property-owner page.</p></div>
-      <a class="btn" href="${SITE}/owners.html#survey" target="_blank" rel="noopener">View form ↗</a></div>
+      <a class="btn" href="${SITE}/owners#survey" target="_blank" rel="noopener">View form ↗</a></div>
     <div class="table-wrap"><table>
       <thead><tr><th>Received</th><th>Contact</th><th>Property</th><th>Message</th><th>Status</th><th>Note</th></tr></thead>
       <tbody>${r.data.length ? r.data.map((l) => html`<tr data-id="${l.id}">

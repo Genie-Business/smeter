@@ -14,7 +14,7 @@ export function requireLandlord() {
     try {
       const claims = await authenticate(req);
       if (claims.role !== 'landlord') throw forbidden();
-      const landlord = db().prepare('SELECT * FROM landlords WHERE id = ?').get(Number(claims.sub));
+      const landlord = await db().get('SELECT * FROM landlords WHERE id = ?', Number(claims.sub));
       if (!landlord) throw unauthorized();
       req.landlord = landlord;
       next();
@@ -30,7 +30,7 @@ export function requireStaff({ role } = {}) {
     try {
       const claims = await authenticate(req);
       if (claims.role !== 'staff') throw forbidden();
-      const staff = db().prepare('SELECT id, email, name, role FROM staff WHERE id = ?').get(Number(claims.sub));
+      const staff = await db().get('SELECT id, email, name, role FROM staff WHERE id = ?', Number(claims.sub));
       if (!staff) throw unauthorized();
       if (role && staff.role !== role) throw forbidden('Only account owners can do this');
       req.staff = staff;
@@ -46,9 +46,7 @@ export function requireTenant() {
     try {
       const claims = await authenticate(req);
       if (claims.role !== 'tenant') throw forbidden();
-      const meter = db()
-        .prepare("SELECT * FROM meters WHERE meter_id = ? AND status = 'active'")
-        .get(claims.sub);
+      const meter = await db().get("SELECT * FROM meters WHERE meter_id = ? AND status = 'active'", claims.sub);
       if (!meter) throw unauthorized('This meter is no longer linked to your account');
       req.meter = meter;
       next();

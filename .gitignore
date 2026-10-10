@@ -23,3 +23,6 @@ key.properties
 
 # Gradle/Kotlin build cache
 mobile/android/.kotlin/
+
+# Local embedded Postgres (PGlite) when the API runs from the repo root
+data/

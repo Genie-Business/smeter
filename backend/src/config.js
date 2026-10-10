@@ -47,13 +47,16 @@ export const config = {
     (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : `http://localhost:${num('PORT', 8080)}`)
   ).replace(/\/$/, ''),
   appScheme: env.APP_SCHEME ?? 'smeter',
-  // Vercel functions can only write to /tmp (per instance, not persistent).
-  databasePath: env.DATABASE_PATH || (onVercel ? '/tmp/smeter.db' : './data/smeter.db'),
+  // Postgres (Neon). The Vercel ↔ Neon integration sets DATABASE_URL (and
+  // POSTGRES_URL). Without one, local runs use an embedded PGlite database
+  // stored in PGLITE_DIR ('memory' for a throwaway one).
+  databaseUrl: env.DATABASE_URL || env.POSTGRES_URL || '',
+  pgliteDir: env.PGLITE_DIR || './data/pglite',
+  // Vercel Cron sends this as a bearer token to /internal/sweep.
+  cronSecret: env.CRON_SECRET || '',
   jwtSecret: env.JWT_SECRET || (deployed ? '' : 'dev-only-insecure-secret-change-me'),
   corsOrigins: (env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
 
-  // Images uploaded from the admin dashboard; served at /uploads/<file>.
-  uploadDir: env.UPLOAD_DIR || (onVercel ? '/tmp/uploads' : './data/uploads'),
   // Optionally serve the static website (including /admin) from this process
   // (handy locally; in production it's usually a separate static host).
   siteDir: env.SITE_DIR || '',
@@ -131,6 +134,9 @@ export function assertConfig() {
   const problems = [];
   if ((config.isProduction || deployed) && config.jwtSecret.length < 32) {
     problems.push('JWT_SECRET must be at least 32 characters when deployed');
+  }
+  if ((config.isProduction || config.onVercel) && !config.databaseUrl) {
+    problems.push('DATABASE_URL is required when deployed (connect a Neon Postgres database)');
   }
   if (config.geni.mode === 'live' && !geniHasCreds) {
     problems.push('GENI_MODE=live requires GENI_USER_ID and GENI_PASSWORD');
