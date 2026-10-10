@@ -9,7 +9,7 @@ meter.
 smeter/
 ├── backend/   Node.js (plain JavaScript, Express 5) API — owns users, payments, pricing, content
 ├── website/   4-page marketing site (static HTML/CSS/JS, no build) — drives app downloads
-├── admin/     Admin dashboard for the smeter team (static, no build) — content + operations
+│   └── admin/ Admin dashboard for the smeter team, served at /admin — content + operations
 └── docs/      Geni head-end API collection (sanitised — no tokens/passwords)
 ```
 
@@ -80,15 +80,16 @@ reuse its header, type and tiles. Every “Get the app” button opens a downloa
 store buttons when the URLs are set in the admin, otherwise a *coming soon — notify me*
 form. The owners page posts *Book a free site survey* leads to the API. Text, images,
 contact details and store links are fetched from `/v1/public/content/site` and
-override the HTML defaults, so the pages still render and index without the API. Set
-the API origin in `website/assets/config.js`.
+override the HTML defaults, so the pages still render and index without the API. The
+API origin is set in `website/assets/config.js` (the hosted API by default, the local
+one on localhost).
 
 Imagery in `website/assets/img/` is AI-generated for smeter (Nigerian homes, owners,
 tenants, installers, Lagos) plus 3D renders, alongside the meter render from the sales
 deck. Any image can be replaced from the admin dashboard.
 
-**Admin dashboard** (`admin/`) for the smeter team, separate from the website and the
-owners’ app:
+**Admin dashboard** (`website/admin/`, deployed with the website at `/admin`, not
+indexed) for the smeter team, separate from the owners’ app:
 - **Overview:** 30-day sales, today, meters by mode/status, and items needing attention.
 - **Property owners, Meters, Purchases:** search and drill into every owner and meter, with tenant details, live readings (GPRS meters) and purchases.
 - **Owner leads** from the website (status and notes) and **App sign-ups** (CSV export).
@@ -97,9 +98,8 @@ owners’ app:
 
 Create the first account with `ADMIN_EMAIL` + `ADMIN_PASSWORD` in `.env` (created on
 first boot), or `npm run staff:create -- <email> <name> <password> [owner|editor]`.
-The server can serve both sites itself (`SITE_DIR=../website`, `ADMIN_DIR=../admin`,
-with the admin at `/admin`). When they’re hosted separately, add their origins to
-`CORS_ORIGINS` and set `window.SMETER_API` in each `config.js`.
+The API can serve the website (and so the admin) itself with `SITE_DIR` pointing at
+`website/`. When the website is hosted separately, add its origin to `CORS_ORIGINS`.
 
 ## Running locally
 
@@ -116,7 +116,26 @@ npm test           # 32 tests: pricing, curve parsing, purchase flow, manual mod
 With no credentials set, everything runs against mocks:
 - **Mock head-end:** any 6–20-digit meter number exists, except numbers starting `000`. Numbers ending in `9` report offline, which exercises the manual-token path.
 - **Mock checkout:** served at `/pay/mock/:reference`.
-- **OTP codes:** printed to the server log and returned as `devCode`. This never happens when `NODE_ENV=production`.
+- **OTP codes:** printed to the server log and returned as `devCode` in development. Staging can opt in with `OTP_DEBUG_ECHO=true`. Never in production.
+
+## Deploying the API on Vercel
+
+`backend/` deploys as one serverless function (`backend/api/index.js`, routed by
+`backend/vercel.json`). Set the project's **Root Directory** to `backend` and add:
+
+| Variable | Value |
+|---|---|
+| `APP_ENV` | `staging` (allows mocks) or `production` (requires real Geni + Paystack) |
+| `JWT_SECRET` | 32+ random characters |
+| `CORS_ORIGINS` | The website's origin, e.g. `https://smeter.ng` (or `*`) |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First admin-dashboard account |
+| `OTP_DEBUG_ECHO` | `true` on staging to see OTPs without SMS |
+
+If the config is invalid the API answers every request with `503 misconfigured` and
+the reason. **Limits on Vercel:** the SQLite file and uploads live in `/tmp`, so data
+is per-instance and is lost on cold starts, and the payment-audit sweeper doesn't
+run. That's fine for a demo; production needs a hosted database (e.g. Postgres) or a
+server with a persistent disk.
 
 ## Going live — credentials to add
 
@@ -127,7 +146,7 @@ With no credentials set, everything runs against mocks:
 | `GENI_TOKEN_TASK_PROTOCOL_ID`, `GENI_DISCONNECT_*`, `GENI_RECONNECT_*` | Remote-task protocol ids/payloads for these meters — confirm with the vendor |
 | `PAYSTACK_SECRET_KEY` | Checkout, webhooks (`POST /v1/webhooks/paystack`), bank resolution, subaccounts |
 | `TERMII_API_KEY` | SMS for OTPs and invites |
-| `JWT_SECRET`, `PUBLIC_URL`, `NODE_ENV=production` | The server refuses to start in production with mocks or a weak secret |
+| `JWT_SECRET`, `PUBLIC_URL`, `APP_ENV=production` | The server refuses to start in production with mocks or a weak secret |
 
 Things to verify against the real head-end once credentials are in (the collection
 only documents placeholders):

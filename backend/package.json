@@ -5,7 +5,7 @@
   "description": "smeter API - tenants, property owners and prepaid meters on top of the Geni meter head-end",
   "type": "module",
   "engines": {
-    "node": ">=22.13"
+    "node": "24.x"
   },
   "main": "src/server.js",
   "scripts": {

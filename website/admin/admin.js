@@ -1,6 +1,7 @@
 // smeter admin dashboard — vanilla JS, hash-routed, talks to /v1/staff/*.
 const API = (window.SMETER_API || '').replace(/\/$/, '');
-const SITE = (window.SMETER_SITE || '').replace(/\/$/, '');
+// The dashboard lives at <site>/admin/, so the website is one level up.
+const SITE = new URL('..', location.href).href.replace(/\/$/, '');
 const app = document.getElementById('app');
 const TOKEN_KEY = 'smeter.staff.token';
 

@@ -18,7 +18,14 @@ function bool(name, fallback) {
 }
 
 const nodeEnv = env.NODE_ENV ?? 'development';
-const isProduction = nodeEnv === 'production';
+// APP_ENV is the business environment, separate from NODE_ENV (which hosts like
+// Vercel always set to 'production'): 'development' | 'staging' | 'production'.
+// Staging may run on mocks; production may not.
+const appEnv = env.APP_ENV || (nodeEnv === 'production' ? 'production' : nodeEnv === 'test' ? 'test' : 'development');
+const isProduction = appEnv === 'production';
+// Deployed (non-local) host: needs a real secret even in staging.
+const onVercel = Boolean(env.VERCEL);
+const deployed = onVercel || nodeEnv === 'production';
 
 const geniHasCreds = Boolean(env.GENI_USER_ID && env.GENI_PASSWORD);
 const geniMode = env.GENI_MODE ?? (geniHasCreds ? 'live' : 'mock');
@@ -30,21 +37,26 @@ const smsProvider = env.SMS_PROVIDER ?? (env.TERMII_API_KEY ? 'termii' : 'log');
 
 export const config = {
   nodeEnv,
+  appEnv,
   isProduction,
+  onVercel,
   isTest: nodeEnv === 'test',
   port: num('PORT', 8080),
-  publicUrl: (env.PUBLIC_URL ?? `http://localhost:${num('PORT', 8080)}`).replace(/\/$/, ''),
+  publicUrl: (
+    env.PUBLIC_URL ||
+    (env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${env.VERCEL_PROJECT_PRODUCTION_URL}` : `http://localhost:${num('PORT', 8080)}`)
+  ).replace(/\/$/, ''),
   appScheme: env.APP_SCHEME ?? 'smeter',
-  databasePath: env.DATABASE_PATH ?? './data/smeter.db',
-  jwtSecret: env.JWT_SECRET || (isProduction ? '' : 'dev-only-insecure-secret-change-me'),
+  // Vercel functions can only write to /tmp (per instance, not persistent).
+  databasePath: env.DATABASE_PATH || (onVercel ? '/tmp/smeter.db' : './data/smeter.db'),
+  jwtSecret: env.JWT_SECRET || (deployed ? '' : 'dev-only-insecure-secret-change-me'),
   corsOrigins: (env.CORS_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
 
   // Images uploaded from the admin dashboard; served at /uploads/<file>.
-  uploadDir: env.UPLOAD_DIR || './data/uploads',
-  // Optionally serve the static website and admin dashboard from this process
-  // (handy locally; in production they're usually separate static hosts).
+  uploadDir: env.UPLOAD_DIR || (onVercel ? '/tmp/uploads' : './data/uploads'),
+  // Optionally serve the static website (including /admin) from this process
+  // (handy locally; in production it's usually a separate static host).
   siteDir: env.SITE_DIR || '',
-  adminDir: env.ADMIN_DIR || '',
   // First admin-dashboard account, created on boot when no staff exist yet.
   bootstrapStaff: {
     email: env.ADMIN_EMAIL || '',
@@ -108,7 +120,8 @@ export const config = {
     ttlMinutes: num('OTP_TTL_MINUTES', 5),
     maxAttempts: num('OTP_MAX_ATTEMPTS', 5),
     // Return OTP codes in API responses. Never honoured in production.
-    echo: !isProduction && bool('OTP_DEBUG_ECHO', nodeEnv !== 'production'),
+    // Only on by default for local development; staging must opt in.
+    echo: !isProduction && bool('OTP_DEBUG_ECHO', appEnv === 'development' || appEnv === 'test'),
   },
 
   liveCacheSeconds: num('LIVE_CACHE_SECONDS', 5),
@@ -116,8 +129,8 @@ export const config = {
 
 export function assertConfig() {
   const problems = [];
-  if (config.isProduction && config.jwtSecret.length < 32) {
-    problems.push('JWT_SECRET must be at least 32 characters in production');
+  if ((config.isProduction || deployed) && config.jwtSecret.length < 32) {
+    problems.push('JWT_SECRET must be at least 32 characters when deployed');
   }
   if (config.geni.mode === 'live' && !geniHasCreds) {
     problems.push('GENI_MODE=live requires GENI_USER_ID and GENI_PASSWORD');

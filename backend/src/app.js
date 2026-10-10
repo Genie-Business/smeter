@@ -23,7 +23,8 @@ export function createApp() {
     });
     if (config.isProduction) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
     const origin = req.get('origin');
-    if (origin && config.corsOrigins.includes(origin)) {
+    // Auth is bearer tokens (no cookies), so '*' is safe to reflect.
+    if (origin && (config.corsOrigins.includes(origin) || config.corsOrigins.includes('*'))) {
       res.set({
         'Access-Control-Allow-Origin': origin,
         'Access-Control-Allow-Headers': 'Authorization, Content-Type',
@@ -55,8 +56,7 @@ export function createApp() {
   // Images uploaded from the admin dashboard (immutable, random names).
   app.use('/uploads', express.static(config.uploadDir, { maxAge: '30d', immutable: true, index: false }));
 
-  // Optional static hosting for the admin dashboard and website.
-  if (config.adminDir) app.use('/admin', express.static(config.adminDir, { index: 'index.html' }));
+  // Optional static hosting for the website (the admin dashboard lives at /admin).
   if (config.siteDir) app.use('/', express.static(config.siteDir, { extensions: ['html'] }));
 
   app.use((_req, _res, next) => next(new AppError(404, 'not_found', 'Route not found')));
