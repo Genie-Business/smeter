@@ -1,5 +1,4 @@
-/* smeter website — shared styles. Editorial / brutalist-archive look:
-   warm paper, oversized condensed uppercase, rounded tiles, floating header card. */
+/* smeter website: shared styles. */
 
 @font-face {
   font-family: "Archivo";
@@ -82,7 +81,7 @@ button { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid #3b82f6; outline-offset: 3px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-/* ───────────────────────── Header card ───────────────────────── */
+/* Header card */
 
 .hdr {
   position: relative;
@@ -138,7 +137,7 @@ button { font: inherit; color: inherit; }
 /* Drop-down panel (mobile / tablet) */
 .panel { display: none; }
 
-/* ───────────────────────── Tiles & marquee ───────────────────────── */
+/* Tiles & marquee */
 
 .grid { position: absolute; }
 .col { position: absolute; width: var(--col); display: flex; flex-direction: column; gap: var(--gap); animation: colDown 14.6s linear infinite; will-change: transform; }
@@ -181,7 +180,7 @@ button { font: inherit; color: inherit; }
 .red.stat, .dark.stat { color: #fff; }
 .tag { position: absolute; left: 14px; top: 14px; z-index: 1; padding: 6px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.92); font-size: 11px; font-weight: 700; letter-spacing: 0.02em; color: var(--ink); }
 
-/* ───────────────────────── Landing: hero copy ───────────────────────── */
+/* Landing: hero copy */
 
 .hero h1 {
   margin: 0; font-family: var(--display); font-weight: 900; text-transform: uppercase;
@@ -207,7 +206,7 @@ button { font: inherit; color: inherit; }
    page scrolls below it. */
 .landing-top { position: relative; height: 100vh; height: 100svh; overflow: hidden; }
 
-/* ── Desktop (scaled 1280×800 canvas) ── */
+/* Desktop (scaled 1280×800 canvas) */
 html.desk .landing-stage {
   position: absolute; left: 0; top: 0; width: calc(var(--W) * 1px); height: calc(var(--H) * 1px);
   transform: scale(var(--s)); transform-origin: 0 0; overflow: hidden;
@@ -233,7 +232,7 @@ html.desk.ex1 .hero::before, html.desk.ex2 .hero::before, html.desk.ex3 .hero::b
 }
 html.desk .menu-btn { display: none; }
 
-/* ── Mobile portrait ── */
+/* Mobile portrait */
 html.mob {
   --tm: 14px; --hp: 16px; --hh: 64px; --h1: clamp(40px, 12.4vw, 58px); --fp: 15px; --btn: 52px;
   --m-ph: 22px; --m-u: 15px; --m-p: 13px; --m-fu: 22px; --m-fp: 13px;
@@ -285,7 +284,7 @@ html.mob-l .landing-stage .grid { --gw: var(--lgw); grid-row: 1 / -1; grid-colum
 html.mob-l .c1, html.mob-l .c3 { top: calc(var(--hh) - var(--pitch) * 0.2); }
 html.mob-l .c2 { top: calc(var(--hh) - var(--pitch) * 0.7); }
 
-/* ── Tablet ── */
+/* Tablet */
 html.tab { --tm: clamp(20px, 3.5vw, 40px); --hh: 102px; --h1: clamp(48px, 6.4vw, 80px); }
 html.tab .mnav .nl { display: none; }
 html.tab-l .landing-stage { position: relative; height: 100svh; overflow: hidden; }
@@ -308,7 +307,7 @@ html.tab-p .c1 { left: 0; top: calc(var(--pitch) * -0.3); }
 html.tab-p .c2 { left: calc(var(--col) + var(--gap)); top: calc(var(--pitch) * -0.65); }
 html.tab-p .c3 { left: calc(2 * (var(--col) + var(--gap))); top: calc(var(--pitch) * -0.15); }
 
-/* ── Menu panel (mob + tab) ── */
+/* Menu panel (mob + tab) */
 html.mob .panel, html.tab .panel {
   display: grid; grid-template-rows: 0fr; transition: grid-template-rows 0.4s var(--ease-expo);
   border-top: 1px solid transparent;
@@ -331,13 +330,13 @@ html.mob .panel > div, html.tab .panel > div { overflow: hidden; }
 .hdr[data-open] .panel nav a:nth-child(4) { animation-delay: 0.12s; }
 @keyframes navIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 
-/* ── Load entrance (initial state; WAAPI animates out of it) ── */
+/* Load entrance (initial state; WAAPI animates out of it) */
 html.intro .hdr { transform: translateY(calc(-100% - 48px)); }
 html.intro .logo, html.intro .mnav > *, html.intro .cta, html.intro .hero p, html.intro .hero .acts > *, html.intro .stores, html.intro .scroll-cue, html.intro .landing-stage .grid .col { opacity: 0; }
 html.intro .hero h1 .ln > span { transform: translateY(110%); }
 .hero h1.masking .ln { clip-path: inset(-0.1em -0.2em 0 -0.2em); }
 
-/* ───────────────────────── Inner pages ───────────────────────── */
+/* Inner pages */
 
 body.page .hdr { position: sticky; top: 0; margin: 0 clamp(10px, 3vw, 40px); }
 html.mob body.page .hdr .hmain { height: var(--hh); }
@@ -453,7 +452,7 @@ html.mob body.page .hdr .hmain { height: var(--hh); }
 .foot .links a { text-decoration: none; font-weight: 600; color: var(--ink); }
 .foot .links a:hover { color: var(--purple); }
 
-/* ───────────────────────── Landing: below the first screen ───────────────────────── */
+/* Landing: below the first screen */
 
 .scroll-cue {
   display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
@@ -539,7 +538,7 @@ html.mob body.page .hdr .hmain { height: var(--hh); }
 @media (min-width: 901px) and (max-width: 1100px) { .cards { --n: 2 !important; } }
 @media (min-width: 640px) and (max-width: 900px) { .steps .cards { --n: 2 !important; } }
 
-/* ───────────────────────── Download sheet ───────────────────────── */
+/* Download sheet */
 
 .sheet { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 16px; }
 .sheet[hidden] { display: none; }

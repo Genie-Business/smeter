@@ -1,12 +1,11 @@
-// smeter admin dashboard — vanilla JS, hash-routed, talks to /v1/staff/*.
+// smeter admin dashboard: vanilla JS, hash-routed, talks to /v1/staff/*.
 const API = (window.SMETER_API || '').replace(/\/$/, '');
 // The dashboard lives at <site>/admin/, so the website is one level up.
 const SITE = new URL('..', location.href).href.replace(/\/$/, '');
 const app = document.getElementById('app');
 const TOKEN_KEY = 'smeter.staff.token';
 
-// ───────────────────────── Safe templating ─────────────────────────
-
+// Safe templating
 class Raw { constructor(s) { this.s = s; } }
 const raw = (s) => new Raw(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -25,21 +24,19 @@ function html(strings, ...vals) {
 }
 const render = (el, tpl) => (el.innerHTML = tpl.s);
 
-// ───────────────────────── Formatting ─────────────────────────
-
-const naira = (n) => (n == null ? '—' : '₦' + Number(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-const nairaWhole = (n) => (n == null ? '—' : '₦' + Math.round(Number(n)).toLocaleString('en-NG'));
-const num = (n) => (n == null ? '—' : Number(n).toLocaleString('en-NG'));
-const date = (s) => (s ? new Date(s).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
-const dateTime = (s) => (s ? new Date(s).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—');
+// Formatting
+const naira = (n) => (n == null ? '-' : '₦' + Number(n).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const nairaWhole = (n) => (n == null ? '-' : '₦' + Math.round(Number(n)).toLocaleString('en-NG'));
+const num = (n) => (n == null ? '-' : Number(n).toLocaleString('en-NG'));
+const date = (s) => (s ? new Date(s).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }) : '-');
+const dateTime = (s) => (s ? new Date(s).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '-');
 const humanize = (k) => String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 const STATUS_TONE = { vended: 'ok', pending: 'warn', paid: 'info', vending: 'info', failed: 'bad', abandoned: '', active: 'ok', invited: 'warn', new: 'brand', contacted: 'info', surveyed: 'info', onboarded: 'ok', closed: '' };
 const statusPill = (s) => html`<span class="pill ${STATUS_TONE[s] ?? ''}">${humanize(s)}</span>`;
 const modePill = (m) => (m === 'manual' ? html`<span class="pill warn">Manual token</span>` : html`<span class="pill info">GPRS</span>`);
 
-// ───────────────────────── API ─────────────────────────
-
+// API
 let token = localStorage.getItem(TOKEN_KEY);
 let me = null;
 
@@ -81,8 +78,7 @@ function signOut() {
   location.hash = '#/login';
 }
 
-// ───────────────────────── Icons ─────────────────────────
-
+// Icons
 const I = {
   home: '<path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   owners: '<path d="M4 21V8l8-5 8 5v13M9 21v-6h6v6"/>',
@@ -98,8 +94,7 @@ const I = {
 const icon = (name) => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${I[name]}</svg>`);
 const brandMark = raw('<span class="mark"><svg viewBox="0 0 24 24"><path d="M13.5 3 6 13.5h4.8L9.5 21 18 10h-5.2z" fill="#fcdd71"/></svg></span>');
 
-// ───────────────────────── Router ─────────────────────────
-
+// Router
 const routes = [
   [/^#\/?$/, overview],
   [/^#\/owners$/, ownersList],
@@ -129,7 +124,7 @@ async function route() {
   const match = routes.find(([re]) => re.test(hash));
   shell(hash);
   const main = document.getElementById('main');
-  render(main, html`<div class="empty">Loading…</div>`);
+  render(main, html`<div class="empty">Loading...</div>`);
   try {
     if (!match) return render(main, html`<div class="empty">Page not found.</div>`);
     await match[1](main, ...hash.match(match[0]).slice(1));
@@ -202,8 +197,7 @@ function shell(hash) {
   shell(hash);
 }
 
-// ───────────────────────── Login ─────────────────────────
-
+// Login
 function loginView() {
   render(app, html`
     <div class="login">
@@ -236,8 +230,7 @@ function loginView() {
   };
 }
 
-// ───────────────────────── Shared bits ─────────────────────────
-
+// Shared bits
 function pager(main, { page, pageSize, total }, onPage) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const el = document.createElement('div');
@@ -255,7 +248,7 @@ function purchaseRows(list, { showMeter = true } = {}) {
     <td>${dateTime(p.vendedAt || p.createdAt)}</td>
     ${showMeter ? html`<td><a href="#/meters/${p.meterId}">${p.meterId}</a></td>` : ''}
     <td class="r num">${naira(p.total)}</td>
-    <td class="r num">${p.units == null ? '—' : p.units.toFixed(2)}</td>
+    <td class="r num">${p.units == null ? '-' : p.units.toFixed(2)}</td>
     <td class="r num">${naira(p.landlordNet)}</td>
     <td>${statusPill(p.status)} ${p.delivery === 'manual' ? html`<span class="pill">Token</span>` : ''}</td>
     <td class="mono">${p.reference}</td>
@@ -264,8 +257,7 @@ function purchaseRows(list, { showMeter = true } = {}) {
 const purchaseHead = (showMeter = true) =>
   html`<tr><th>When</th>${showMeter ? html`<th>Meter</th>` : ''}<th class="r">Total</th><th class="r">kWh</th><th class="r">Owner gets</th><th>Status</th><th>Reference</th></tr>`;
 
-// ───────────────────────── Overview ─────────────────────────
-
+// Overview
 async function overview(main) {
   const o = await api('/overview');
   attention = o.attention;
@@ -301,8 +293,7 @@ async function overview(main) {
   if (!count && attention.newLeads) document.querySelector('.side a[href="#/leads"]').insertAdjacentHTML('beforeend', `<span class="count">${attention.newLeads}</span>`);
 }
 
-// ───────────────────────── Owners ─────────────────────────
-
+// Owners
 async function ownersList(main, _x, state = { page: 1, search: '' }) {
   const r = await api(`/landlords?page=${state.page}&search=${encodeURIComponent(state.search)}`);
   render(main, html`
@@ -337,7 +328,7 @@ async function ownerDetail(main, id) {
       <div class="card"><h2>Pricing</h2><dl class="kv">
         <dt>Price per kWh</dt><dd>${l.unitPrice ? naira(l.unitPrice) : 'Not set'}</dd>
         <dt>Service fee paid by</dt><dd>${humanize(l.feeBearer)}</dd>
-        <dt>Address</dt><dd>${l.address || '—'}</dd></dl></div>
+        <dt>Address</dt><dd>${l.address || '-'}</dd></dl></div>
       <div class="card"><h2>Payout account</h2>${l.bank ? html`<dl class="kv">
         <dt>Bank</dt><dd>${l.bank.bankName}</dd><dt>Account</dt><dd class="mono">${l.bank.accountNumber}</dd>
         <dt>Name</dt><dd>${l.bank.accountName}</dd><dt>Status</dt><dd>${l.bank.settlementActive ? html`<span class="pill ok">Automatic payouts</span>` : html`<span class="pill warn">Unverified</span>`}</dd></dl>` : html`<p class="muted">No payout account yet.</p>`}</div>
@@ -346,16 +337,15 @@ async function ownerDetail(main, id) {
     <div class="table-wrap"><table>
       <thead><tr><th>Meter</th><th>Tenant</th><th>Address</th><th>Mode</th><th>Status</th><th class="r">Debt</th></tr></thead>
       <tbody>${r.meters.length ? r.meters.map((m) => html`<tr class="link" data-href="#/meters/${m.meterId}">
-        <td class="mono">${m.meterId}</td><td>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '—'}<div class="muted">${m.tenant.phone}</div></td>
-        <td>${m.address}${m.apartment ? `, Apt ${m.apartment}` : ''}</td><td>${modePill(m.deliveryMode)}</td><td>${statusPill(m.status)}</td><td class="r num">${m.debt ? naira(m.debt) : '—'}</td></tr>`) : html`<tr><td colspan="6" class="empty">No meters yet.</td></tr>`}</tbody>
+        <td class="mono">${m.meterId}</td><td>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '-'}<div class="muted">${m.tenant.phone}</div></td>
+        <td>${m.address}${m.apartment ? `, Apt ${m.apartment}` : ''}</td><td>${modePill(m.deliveryMode)}</td><td>${statusPill(m.status)}</td><td class="r num">${m.debt ? naira(m.debt) : '-'}</td></tr>`) : html`<tr><td colspan="6" class="empty">No meters yet.</td></tr>`}</tbody>
     </table></div>
     <h2 style="margin:22px 0 10px;font-size:17px">Recent purchases</h2>
     <div class="table-wrap"><table><thead>${purchaseHead()}</thead><tbody>${purchaseRows(r.purchases)}</tbody></table></div>`);
   wireRows(main);
 }
 
-// ───────────────────────── Meters ─────────────────────────
-
+// Meters
 async function metersList(main, _x, state = { page: 1, search: '', mode: '', status: '' }) {
   const q = new URLSearchParams({ page: state.page, search: state.search, mode: state.mode, status: state.status });
   const r = await api(`/meters?${q}`);
@@ -371,7 +361,7 @@ async function metersList(main, _x, state = { page: 1, search: '', mode: '', sta
       <thead><tr><th>Meter</th><th>Owner</th><th>Tenant</th><th>Mode</th><th>Status</th><th class="r">Spent</th><th>Last purchase</th></tr></thead>
       <tbody>${r.data.length ? r.data.map((m) => html`<tr class="link" data-href="#/meters/${m.meterId}">
         <td class="mono">${m.meterId}<div class="muted" style="font-family:var(--font)">${m.address}${m.apartment ? `, Apt ${m.apartment}` : ''}</div></td>
-        <td>${m.landlordName}</td><td>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '—'}<div class="muted">${m.tenant.phone}</div></td>
+        <td>${m.landlordName}</td><td>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '-'}<div class="muted">${m.tenant.phone}</div></td>
         <td>${modePill(m.deliveryMode)}</td><td>${statusPill(m.status)} ${m.relayState.startsWith('disconnect') ? html`<span class="pill bad">Off</span>` : ''}</td>
         <td class="r num">${nairaWhole(m.spent)}</td><td>${date(m.lastPurchase)}</td></tr>`) : html`<tr><td colspan="7" class="empty">No meters match.</td></tr>`}</tbody>
     </table></div>`);
@@ -392,23 +382,22 @@ async function meterDetail(main, meterId) {
       <div style="display:flex;gap:6px">${modePill(m.deliveryMode)} ${statusPill(m.status)}</div></div>
     <div class="grid g3">
       <div class="card"><h2>Tenant</h2><dl class="kv">
-        <dt>Name</dt><dd>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '—'}</dd>
-        <dt>Phone</dt><dd>${m.tenant.phone}</dd><dt>Email</dt><dd>${m.tenant.email || '—'}</dd>
+        <dt>Name</dt><dd>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '-'}</dd>
+        <dt>Phone</dt><dd>${m.tenant.phone}</dd><dt>Email</dt><dd>${m.tenant.email || '-'}</dd>
         <dt>Connected</dt><dd>${m.acceptedAt ? date(m.acceptedAt) : 'Not yet'}</dd>
         <dt>Debt</dt><dd>${m.debt ? `${naira(m.debt)} · ${m.debtRecoveryPercent}% per purchase` : 'None'}</dd></dl></div>
-      <div class="card"><h2>Owner</h2>${r.landlord ? html`<dl class="kv"><dt>Name</dt><dd><a href="#/owners/${r.landlord.id}">${r.landlord.fullName}</a></dd><dt>Phone</dt><dd>${r.landlord.phone}</dd><dt>Email</dt><dd>${r.landlord.email}</dd></dl>` : html`<p class="muted">—</p>`}</div>
-      <div class="card"><h2>Meter link</h2>${m.deliveryMode === 'manual' ? html`<p class="muted">Manual-token meter — no GPRS link, so no live readings.</p>` : live ? html`<dl class="kv">
+      <div class="card"><h2>Owner</h2>${r.landlord ? html`<dl class="kv"><dt>Name</dt><dd><a href="#/owners/${r.landlord.id}">${r.landlord.fullName}</a></dd><dt>Phone</dt><dd>${r.landlord.phone}</dd><dt>Email</dt><dd>${r.landlord.email}</dd></dl>` : html`<p class="muted">-</p>`}</div>
+      <div class="card"><h2>Meter link</h2>${m.deliveryMode === 'manual' ? html`<p class="muted">Manual-token meter. It has no GPRS link, so there are no live readings.</p>` : live ? html`<dl class="kv">
         <dt>Connection</dt><dd>${live.online ? html`<span class="pill ok">Online</span>` : html`<span class="pill warn">Offline</span>`}</dd>
-        <dt>Last seen</dt><dd>${dateTime(live.lastSeen)}</dd><dt>Voltage</dt><dd>${live.volts == null ? '—' : live.volts.toFixed(0) + ' V'}</dd>
-        <dt>Current</dt><dd>${live.amps == null ? '—' : live.amps.toFixed(1) + ' A'}</dd><dt>Load</dt><dd>${live.kw == null ? '—' : live.kw.toFixed(2) + ' kW'}</dd>
+        <dt>Last seen</dt><dd>${dateTime(live.lastSeen)}</dd><dt>Voltage</dt><dd>${live.volts == null ? '-' : live.volts.toFixed(0) + ' V'}</dd>
+        <dt>Current</dt><dd>${live.amps == null ? '-' : live.amps.toFixed(1) + ' A'}</dd><dt>Load</dt><dd>${live.kw == null ? '-' : live.kw.toFixed(2) + ' kW'}</dd>
         <dt>Supply</dt><dd>${humanize(m.relayState)}</dd></dl>` : html`<p class="muted">Couldn’t reach the meter head-end.</p>`}</div>
     </div>
     <h2 style="margin:22px 0 10px;font-size:17px">Purchases</h2>
     <div class="table-wrap"><table><thead>${purchaseHead(false)}</thead><tbody>${purchaseRows(r.purchases, { showMeter: false })}</tbody></table></div>`);
 }
 
-// ───────────────────────── Purchases ─────────────────────────
-
+// Purchases
 async function purchasesList(main, _x, state = { page: 1, status: '' }) {
   const r = await api(`/purchases?page=${state.page}&status=${state.status}`);
   const statuses = ['', 'vended', 'pending', 'paid', 'failed', 'abandoned'];
@@ -420,8 +409,7 @@ async function purchasesList(main, _x, state = { page: 1, status: '' }) {
   main.querySelector('#status').onchange = (e) => purchasesList(main, null, { page: 1, status: e.target.value });
 }
 
-// ───────────────────────── Leads & sign-ups ─────────────────────────
-
+// Leads & sign-ups
 async function leadsList(main, _x, state = { page: 1 }) {
   const r = await api(`/leads?page=${state.page}`);
   const statuses = ['new', 'contacted', 'surveyed', 'onboarded', 'closed'];
@@ -433,10 +421,10 @@ async function leadsList(main, _x, state = { page: 1 }) {
       <tbody>${r.data.length ? r.data.map((l) => html`<tr data-id="${l.id}">
         <td>${dateTime(l.createdAt)}</td>
         <td><b>${l.fullName}</b><div><a href="tel:${l.phone}">${l.phone}</a></div>${l.email ? html`<div><a href="mailto:${l.email}">${l.email}</a></div>` : ''}</td>
-        <td>${l.city || '—'}<div class="muted">${l.propertyType ? humanize(l.propertyType) : ''}${l.units ? ` · ${l.units} units` : ''}</div></td>
-        <td style="max-width:260px">${l.message || '—'}</td>
+        <td>${l.city || '-'}<div class="muted">${l.propertyType ? humanize(l.propertyType) : ''}${l.units ? ` · ${l.units} units` : ''}</div></td>
+        <td style="max-width:260px">${l.message || '-'}</td>
         <td><select class="input lead-status" style="width:auto">${statuses.map((s) => html`<option value="${s}" ${s === l.status ? raw('selected') : ''}>${humanize(s)}</option>`)}</select></td>
-        <td><textarea class="input lead-note" rows="2" placeholder="Add a note">${l.note || ''}</textarea></td></tr>`) : html`<tr><td colspan="6" class="empty">No leads yet — they’ll appear here when owners book a survey on the website.</td></tr>`}</tbody>
+        <td><textarea class="input lead-note" rows="2" placeholder="Add a note">${l.note || ''}</textarea></td></tr>`) : html`<tr><td colspan="6" class="empty">No leads yet. They’ll appear here when owners book a survey on the website.</td></tr>`}</tbody>
     </table></div>`);
   pager(main, r, (page) => leadsList(main, null, { page }));
   main.querySelectorAll('tr[data-id]').forEach((tr) => {
@@ -472,8 +460,7 @@ async function signupsList(main) {
   };
 }
 
-// ───────────────────────── Content editor ─────────────────────────
-
+// Content editor
 const LONG_KEYS = /^(body|intro|mission|caption|a|comingSoonBody|formBody|formSuccess|note|message|label)$/;
 const SELECTS = {
   'announcement.tone': ['info', 'success', 'warn', 'danger'],
@@ -482,9 +469,9 @@ const SELECTS = {
 const HINTS = {
   'home.body': 'Wrap words in **double asterisks** to make them bold.',
   'home.headline': 'Four short lines (about 10 characters each). Longer lines make the whole headline shrink.',
-  'product.headline': 'Keep each line short — every item is one line of the big headline.',
-  'company.headline': 'Keep each line short — every item is one line of the big headline.',
-  'owners.headline': 'Keep each line short — every item is one line of the big headline.',
+  'product.headline': 'Keep each line short. Every item is one line of the big headline.',
+  'company.headline': 'Keep each line short. Every item is one line of the big headline.',
+  'owners.headline': 'Keep each line short. Every item is one line of the big headline.',
   'download.androidUrl': 'Google Play listing URL. Leave empty to show “coming soon” and collect sign-ups.',
   'download.iosUrl': 'App Store listing URL. Leave empty to show “coming soon”.',
   'announcement.enabled': 'Shows a banner on the app’s home screen.',
@@ -579,7 +566,7 @@ function contentEditor(main, key) {
       <div class="editor">
         <nav class="toc" aria-label="Sections">${sections.map((s) => html`<a href="#sec-${s}" data-jump="${s}">${humanize(s)}</a>`)}
           <div class="card" style="margin-top:14px;padding:12px"><h2 style="font-size:13px;margin-bottom:8px">History</h2>
-            <div class="history">${history.length ? history.slice(0, 8).map((h) => html`<div class="row"><span>v${h.version} · ${date(h.savedAt)}<br><span class="muted">${h.by || '—'}</span></span>${h.version !== version ? html`<button class="btn sm" type="button" data-restore="${h.version}">Restore</button>` : html`<span class="pill ok">Live</span>`}</div>`) : html`<span class="muted">Using defaults — nothing saved yet.</span>`}</div>
+            <div class="history">${history.length ? history.slice(0, 8).map((h) => html`<div class="row"><span>v${h.version} · ${date(h.savedAt)}<br><span class="muted">${h.by || '-'}</span></span>${h.version !== version ? html`<button class="btn sm" type="button" data-restore="${h.version}">Restore</button>` : html`<span class="pill ok">Live</span>`}</div>`) : html`<span class="muted">Using defaults. Nothing saved yet.</span>`}</div>
             <button class="btn sm danger" type="button" id="reset" style="margin-top:10px;width:100%">Reset to defaults</button></div>
         </nav>
         <div>${sections.map((s) => html`<section class="card section" id="sec-${s}"><h2>${humanize(s)}</h2>${node([s], doc[s])}</section>`)}
@@ -634,7 +621,7 @@ function contentEditor(main, key) {
       if (dirty() && !confirm('Discard your unsaved changes and restore this version?')) return;
       try {
         load(await api(`/content/${key}/restore`, { method: 'POST', body: { version: Number(b.dataset.restore) } }));
-        toast(`Restored version ${b.dataset.restore} — it’s live now`);
+        toast(`Restored version ${b.dataset.restore}. It’s live now`);
       } catch (e) {
         toast(e.message, true);
       }
@@ -676,7 +663,7 @@ function contentEditor(main, key) {
         const r = await api('/uploads', { method: 'POST', raw: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } });
         set(path, r.url);
         draw();
-        toast('Image uploaded — save to publish it');
+        toast('Image uploaded. Save to publish it');
       } catch (e) {
         toast(e.message, true);
       }
@@ -696,8 +683,7 @@ function contentEditor(main, key) {
   return api(`/content/${key}`).then(load);
 }
 
-// ───────────────────────── Team ─────────────────────────
-
+// Team
 async function team(main) {
   const r = await api('/users');
   render(main, html`
@@ -710,7 +696,7 @@ async function team(main) {
         <div class="field"><label for="n">Name</label><input class="input" id="n" required></div>
         <div class="field"><label for="e">Email</label><input class="input" id="e" type="email" required></div>
         <div class="field"><label for="pw">Temporary password</label><input class="input" id="pw" type="text" minlength="10" required autocomplete="new-password"><div class="hint" style="margin:4px 0 0">At least 10 characters. Share it privately.</div></div>
-        <div class="field"><label for="role">Role</label><select class="input" id="role"><option value="editor">Editor — content and data</option><option value="owner">Owner — can also manage the team</option></select></div>
+        <div class="field"><label for="role">Role</label><select class="input" id="role"><option value="editor">Editor: content and data</option><option value="owner">Owner: can also manage the team</option></select></div>
         <button class="btn primary" type="submit">Add member</button></form>`
         : html`<div class="card"><p class="muted">Only account owners can add team members.</p></div>`}
     </div>`);
@@ -729,8 +715,7 @@ async function team(main) {
   }
 }
 
-// ───────────────────────── Helpers ─────────────────────────
-
+// Helpers
 function wireRows(main) {
   main.querySelectorAll('tr.link').forEach((tr) => {
     tr.tabIndex = 0;

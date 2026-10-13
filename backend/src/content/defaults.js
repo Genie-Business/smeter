@@ -35,7 +35,7 @@ export const SITE_DEFAULTS = {
   },
   home: {
     headline: ['Buy power', 'from your', 'phone in', 'seconds'],
-    body: 'smeter is the smart prepaid meter and app for Nigerian homes. Tenants top up by card, transfer or USSD in seconds, and property owners get paid straight to their bank — **no queues, no estimated bills**.',
+    body: 'smeter is the smart prepaid meter and app for Nigerian homes. Tenants top up by card, transfer or USSD in seconds, and property owners get paid straight to their bank. **No queues and no estimated bills.**',
     primaryCta: 'Get the app',
     secondaryCta: 'For property owners',
     tiles: [
@@ -45,7 +45,7 @@ export const SITE_DEFAULTS = {
     ],
     // Sections below the first screen. Tenant/owner points, load modes and the
     // problem stats are shared with the Product and Company pages.
-    promise: ['No queues.', 'No estimated', 'bills. No', 'guesswork.'],
+    promise: ['One meter', 'per home.', 'Pay for what', 'you use.'],
     promiseBody: 'Every apartment gets its own smart prepaid meter. Tenants pay for exactly what they use, from their phone, and property owners see every naira land in their bank.',
     stepsTitle: 'How it works',
     steps: [
@@ -59,8 +59,8 @@ export const SITE_DEFAULTS = {
     ownerTitle: 'Built for property owners',
     ownerBody: 'Set your unit price, get paid automatically and manage every apartment from one screen.',
     ownerCta: 'Book a free site survey',
-    renderCaption: 'The smeter meter, the in-home keypad and the app: everything a home needs to pay for power fairly.',
-    modesTitle: 'Online or off, it just works',
+    renderCaption: 'The smeter meter, the in-home keypad and the app.',
+    modesTitle: 'Works with or without signal',
     whyTitle: 'Why it matters',
     whyBody: 'Millions of Nigerian homes still pay estimated bills. smeter gives every home a meter and a fair price.',
     faqTitle: 'Good to know',
@@ -79,14 +79,14 @@ export const SITE_DEFAULTS = {
     intro: 'A screenless-friendly smart prepaid meter, an in-home keypad, and an app that does the rest. Buy units, see where your power goes, and never queue for a token again.',
     tenantTitle: 'For tenants',
     tenantPoints: [
-      { title: 'Buy power in seconds', body: 'Pay by card, bank transfer or USSD. Units load on your meter automatically — or you get a token to key into the remote.' },
+      { title: 'Buy power in seconds', body: 'Pay by card, bank transfer or USSD. Units load on your meter automatically, or you get a token to key into the remote.' },
       { title: 'See your usage', body: 'Daily, weekly and monthly kWh and spend, so you know exactly where your money goes.' },
       { title: 'Every receipt, every token', body: 'Your purchase history and tokens live in the app. Copy, share or re-enter any of them.' },
       { title: 'Know your price', body: 'The price per unit is shown before you pay, with a clear breakdown of every naira.' },
     ],
     ownerTitle: 'For property owners',
     ownerPoints: [
-      { title: 'Set your own unit price', body: 'Price per kWh for every meter, within regulated limits. Change it any time — tenants see it instantly.' },
+      { title: 'Set your own unit price', body: 'Price per kWh for every meter, within regulated limits. Change it any time and tenants see it instantly.' },
       { title: 'Paid straight to your bank', body: 'Tenant payments settle automatically to your verified account. No cash, no chasing.' },
       { title: 'Recover old debts fairly', body: 'Take an agreed percentage of each purchase until an outstanding balance is cleared.' },
       { title: 'Every meter on one screen', body: 'See each apartment’s meter, tenant and payments, and get alerts when something needs you.' },
@@ -113,7 +113,7 @@ export const SITE_DEFAULTS = {
     ],
     faqs: [
       { q: 'Do I need internet to load units?', a: 'No. If your meter is on manual-token mode, you just type the token into the in-home keypad. Buying the token needs a connection; loading it doesn’t.' },
-      { q: 'What if the token doesn’t load?', a: 'Check the 20 digits and try again — each token works once, on your meter only. Still stuck? Tap Help in the app and we’ll sort it out.' },
+      { q: 'What if the token doesn’t load?', a: 'Check the 20 digits and try again. Each token works once, on your meter only. Still stuck? Tap Help in the app and we’ll sort it out.' },
       { q: 'How do I pay?', a: 'Card, bank transfer or USSD, all through a secure checkout. We never see or store your card details.' },
       { q: 'Who sets the price per unit?', a: 'Your property owner sets it, within the regulated maximum. You always see it before you pay.' },
     ],
@@ -121,18 +121,18 @@ export const SITE_DEFAULTS = {
   company: {
     eyebrow: 'The company',
     headline: ['Power billing', 'should be', 'fair & simple'],
-    intro: 'We started smeter because buying electricity in Nigeria is still guesswork. Millions of homes pay estimated bills, queue for tokens, and argue over shared meters. We think every home deserves to pay for exactly what it uses — from a phone.',
+    intro: 'We started smeter because buying electricity in Nigeria is still guesswork. Millions of homes pay estimated bills, queue for tokens, and argue over shared meters. We think every home deserves to pay for exactly what it uses, right from a phone.',
     problemTitle: 'The problem we’re solving',
     problems: [
       { value: '4.85M', label: 'electricity customers still have no meter, so they pay estimated bills.' },
-      { value: '61.5%', label: 'national metering rate — over a third of customers are still unmetered.' },
+      { value: '61.5%', label: 'national metering rate, so over a third of customers are still unmetered.' },
     ],
     problemSource: 'Source: NERC Q2 2026 metering data, reported September 2026.',
     missionTitle: 'Our mission',
     mission: 'Turn the “dumb” utility meter into a transparent, revenue-optimising digital asset for every African home and business.',
     values: [
       { title: 'Transparency', body: 'Every naira and every kilowatt-hour is visible to the people paying for it.' },
-      { title: 'Reliability', body: 'Hardware with fewer failure points, and a token you can always load — online or off.' },
+      { title: 'Reliability', body: 'Hardware with fewer failure points, and a token you can always load, online or off.' },
       { title: 'Fairness', body: 'Owners get paid on time; tenants pay for what they actually use.' },
     ],
     contactTitle: 'Talk to us',
@@ -142,7 +142,7 @@ export const SITE_DEFAULTS = {
     headline: ['Get paid', 'for power,', 'without chasing', 'tenants'],
     intro: 'smeter fits a smart prepaid meter in each apartment and gives you one app to price units, collect payments and see every meter. Tenants pay before they use. You get paid automatically.',
     benefits: [
-      { value: '100%', label: 'Prepaid — no debts piling up' },
+      { value: '100%', label: 'Prepaid, so debts never pile up' },
       { value: 'Auto', label: 'Payments settle to your bank' },
       { value: '1 app', label: 'Every apartment, one screen' },
     ],
@@ -155,23 +155,23 @@ export const SITE_DEFAULTS = {
     ],
     formTitle: 'Book your free site survey',
     formBody: 'Leave your details and our team will call you within one working day.',
-    formSuccess: 'Thanks — we’ve got your details. Our team will call you within one working day. In the meantime, download the app to look around.',
+    formSuccess: 'Thanks, we’ve got your details. Our team will call you within one working day. In the meantime, download the app to look around.',
     faqs: [
-      { q: 'What does it cost?', a: 'The survey is free. Meter pricing depends on the number of units and phase type — we’ll quote after the survey. There’s no monthly software fee.' },
+      { q: 'What does it cost?', a: 'The survey is free. Meter pricing depends on the number of units and phase type. We’ll quote after the survey. There’s no monthly software fee.' },
       { q: 'How do I earn from it?', a: 'You set the price per kWh. The difference between the utility cost and your price is your margin, settled to your bank with every purchase.' },
       { q: 'What if a tenant owes me money?', a: 'Set a debt and a percentage. A share of each of their purchases goes to you until it’s cleared.' },
-      { q: 'Do my meters need GPRS?', a: 'No. GPRS meters receive units automatically and give live data; manual-token meters work anywhere — tenants key the token into the keypad.' },
+      { q: 'Do my meters need GPRS?', a: 'No. GPRS meters receive units automatically and give live data; manual-token meters work anywhere because tenants key the token into the keypad.' },
     ],
   },
   footer: {
-    note: 'smeter — smart prepaid metering for African homes.',
+    note: 'smeter. Smart prepaid metering for African homes.',
   },
 };
 
 export const APP_DEFAULTS = {
   onboarding: [
     { title: 'Welcome to smeter.', caption: 'Your home’s energy, now in your hands.' },
-    { title: 'View My Bill', caption: 'See what you use and what you spend, day by day — no meter keypad needed.' },
+    { title: 'View My Bill', caption: 'See what you use and what you spend, day by day, with no meter keypad needed.' },
     { title: 'Property Owners', caption: 'Manage your tenant(s) electricity payments all from one screen' },
     { title: 'All Energy Sources', caption: 'One meter, One App to manage them all' },
     { title: 'Manage Your Power', caption: 'Solar or Grid or Generator power, you’ll always know exactly what’s happening' },
@@ -193,7 +193,7 @@ export const APP_DEFAULTS = {
   },
   tokenHelp: [
     { title: 'Wake the remote', body: 'Press any key on your meter remote (the keypad unit inside your home).' },
-    { title: 'Type the 20 digits', body: 'Enter the token exactly as shown — the groups of four make it easier to check.' },
+    { title: 'Type the 20 digits', body: 'Enter the token exactly as shown. The groups of four make it easier to check.' },
     { title: 'Press Enter', body: 'Press the Enter (or #) key. The remote shows “Accept” and your units are added.' },
   ],
 };

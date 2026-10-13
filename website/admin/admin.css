@@ -24,7 +24,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
 h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 
-/* ── Login ── */
+/* Login */
 .login { min-height: 100%; display: grid; place-items: center; padding: 24px; background: radial-gradient(1200px 600px at 10% -10%, #f3e3f5, transparent), var(--bg); }
 .login .card { width: min(420px, 100%); padding: 32px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; letter-spacing: -0.02em; }
@@ -32,7 +32,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 .brand .mark svg { width: 18px; height: 18px; }
 .brand small { font-weight: 600; font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; display: block; }
 
-/* ── Shell ── */
+/* Shell */
 .shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100%; }
 .shell > div { min-width: 0; }
 .side { background: var(--side); color: #d8d6de; padding: 20px 14px; position: sticky; top: 0; height: 100vh; overflow: auto; display: flex; flex-direction: column; }
@@ -55,7 +55,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.01em; }
 .page-head p { margin: 4px 0 0; color: var(--muted); }
 .crumb { color: var(--muted); font-size: 13px; text-decoration: none; display: inline-block; margin-bottom: 6px; }
 
-/* ── Primitives ── */
+/* Primitives */
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; }
 .card h2 { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
 .grid { display: grid; gap: 14px; }
@@ -117,7 +117,7 @@ td.r, th.r { text-align: right; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 
-/* ── Content editor ── */
+/* Content editor */
 .editor { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
 .editor .toc { position: sticky; top: 16px; display: grid; gap: 2px; }
 .editor .toc a { padding: 8px 10px; border-radius: 9px; text-decoration: none; color: var(--ink-soft); font-weight: 600; font-size: 13.5px; text-transform: capitalize; }

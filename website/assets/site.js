@@ -1,11 +1,11 @@
-/* smeter website — shared behaviour (vanilla JS, no dependencies). */
+/* smeter website: shared behaviour (vanilla JS, no dependencies). */
 (() => {
   const html = document.documentElement;
   const isLanding = html.classList.contains('landing');
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const API = (window.SMETER_API || '').replace(/\/$/, '');
 
-  // ───────────── Responsive mode: CSS decides (--mode), JS mirrors as classes ─────────────
+  // Responsive mode: CSS decides (--mode), JS mirrors as classes
   const MODES = ['desk', 'mob', 'mob-l', 'tab', 'tab-l', 'tab-p'];
   function readMode() {
     return getComputedStyle(html).getPropertyValue('--mode').trim() || 'mob';
@@ -33,12 +33,12 @@
   addEventListener('resize', fit, { passive: true });
   addEventListener('orientationchange', fit);
 
-  // ───────────── Marquee: duplicate each column's tiles once for a seamless loop ─────────────
+  // Marquee: duplicate each column's tiles once for a seamless loop
   document.querySelectorAll('.grid .col').forEach((col) => {
     [...col.children].forEach((cell) => col.appendChild(cell.cloneNode(true)));
   });
 
-  // ───────────── Menu (mobile / tablet) ─────────────
+  // Menu (mobile / tablet)
   const hdr = document.querySelector('.hdr');
   const menuBtn = document.querySelector('.menu-btn');
   function setMenu(open) {
@@ -66,7 +66,7 @@
   });
   hdr?.querySelectorAll('.panel a').forEach((a) => a.addEventListener('click', () => setMenu(false)));
 
-  // ───────────── Load entrance (landing) ─────────────
+  // Load entrance (landing)
   if (isLanding && html.classList.contains('intro')) runIntro();
 
   function runIntro() {
@@ -130,7 +130,7 @@
     });
   }
 
-  // ───────────── Floating "Get the app" once the first screen is gone ─────────────
+  // Floating "Get the app" once the first screen is gone
   // Hidden again at the footer, which has its own download buttons.
   const floatCta = document.querySelector('.float-cta');
   const top = document.querySelector('.landing-top');
@@ -151,13 +151,13 @@
     if (foot) obs.observe(foot);
   }
 
-  // ───────────── Reveal on scroll ─────────────
+  // Reveal on scroll
   const io = 'IntersectionObserver' in window && !reduceMotion
     ? new IntersectionObserver((entries) => entries.forEach((e) => e.isIntersecting && (e.target.classList.add('in'), io.unobserve(e.target))), { rootMargin: '0px 0px -8% 0px' })
     : null;
   document.querySelectorAll('.rv').forEach((el) => (io ? io.observe(el) : el.classList.add('in')));
 
-  // ───────────── Editable content from the admin dashboard ─────────────
+  // Editable content from the admin dashboard
   let content = null;
   const get = (obj, path) => path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -246,7 +246,7 @@
     .finally(() => document.fonts.ready.then(fitHeadlines));
   addEventListener('resize', () => requestAnimationFrame(fitHeadlines), { passive: true });
 
-  // ───────────── Download sheet ─────────────
+  // Download sheet
   const ICON_PLAY = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.6 2.3 13.5 12l-9.9 9.7c-.4-.2-.6-.6-.6-1.1V3.4c0-.5.2-.9.6-1.1Zm11.1 10.9 2.6 2.6-11.6 6.6 9-9.2Zm0-2.4-9-9.2 11.6 6.6-2.6 2.6Zm3.6-1.2 2.9 1.7c.8.5.8 1.6 0 2.1l-2.9 1.7-2.8-2.8 2.8-2.7Z"/></svg>';
   const ICON_APPLE = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.2-1.7-3-1.9-3.6-1.9-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.2 2.5-1.8 3.1-.5 7.7 1.3 10.2.9 1.2 1.9 2.6 3.2 2.6 1.3-.1 1.8-.8 3.3-.8 1.6 0 2 .8 3.4.8 1.4 0 2.3-1.3 3.1-2.5 1-1.4 1.4-2.8 1.4-2.9-.1 0-2.8-1-2.9-4.3ZM13.9 5.4c.7-.8 1.2-2 1-3.1-1 0-2.2.7-2.9 1.5-.6.7-1.2 1.9-1 3 1.1.1 2.2-.6 2.9-1.4Z"/></svg>';
   let sheet;
@@ -335,7 +335,7 @@
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error?.message || 'Something went wrong');
       msg.className = 'form-msg ok';
-      msg.textContent = 'Done — we’ll message you as soon as the app is live.';
+      msg.textContent = 'Done. We’ll message you as soon as the app is live.';
       form.querySelector('.row').remove();
       btn.remove();
     } catch (err) {
@@ -352,7 +352,7 @@
     openSheet();
   });
 
-  // ───────────── Property-owner lead form ─────────────
+  // Property-owner lead form
   document.querySelectorAll('form[data-lead]').forEach((form) => {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -367,7 +367,7 @@
       if (!data.phone || data.phone.replace(/\D/g, '').length < 10) bad = fieldErr(form, 'phone', 'Enter a valid phone number');
       if (bad) return;
       btn.disabled = true;
-      btn.textContent = 'Sending…';
+      btn.textContent = 'Sending...';
       try {
         const r = await fetch(`${API}/v1/public/owner-leads`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
         const j = await r.json().catch(() => ({}));
