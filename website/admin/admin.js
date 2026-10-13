@@ -90,6 +90,7 @@ const I = {
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   team: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11a3 3 0 1 0 0-6M21 20c0-2.6-1.7-4.8-4-5.6"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/>',
 };
 const icon = (name) => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${I[name]}</svg>`);
 const brandMark = raw('<span class="mark"><svg viewBox="0 0 24 24"><path d="M13.5 3 6 13.5h4.8L9.5 21 18 10h-5.2z" fill="#fcdd71"/></svg></span>');
@@ -106,6 +107,7 @@ const routes = [
   [/^#\/signups$/, signupsList],
   [/^#\/content\/(site|app)$/, contentEditor],
   [/^#\/team$/, team],
+  [/^#\/settings\/payments$/, paymentSettings],
 ];
 
 let leaveGuard = null; // returns true if navigation should be blocked
@@ -177,6 +179,7 @@ function shell(hash) {
           ${link('#/content/site', 'site', 'Website')}
           ${link('#/content/app', 'phone', 'Mobile app')}
           <div class="group">Settings</div>
+          ${link('#/settings/payments', 'card', 'Payments')}
           ${link('#/team', 'team', 'Team')}
         </nav>
         <div class="me"><b>${me.name}</b>${me.email}<br><span class="pill brand" style="margin-top:6px">${humanize(me.role)}</span><br><button type="button" id="signout">Sign out</button></div>
@@ -713,6 +716,172 @@ async function team(main) {
       }
     };
   }
+}
+
+// Payment settings
+// Same maths as the API's pricing service, for the live example.
+function gatewayFeeKobo(kobo, s) {
+  const pct = Math.round((kobo * s.feePercent) / 100);
+  const flat = kobo >= s.feeFlatThresholdNaira * 100 ? Math.round(s.feeFlatNaira * 100) : 0;
+  return Math.min(Math.round(s.feeCapNaira * 100), pct + flat);
+}
+function grossUpKobo(amount, s) {
+  let total = amount;
+  for (let i = 0; i < 8; i++) {
+    const next = amount + gatewayFeeKobo(total, s);
+    if (next === total) break;
+    total = next;
+  }
+  while (total - gatewayFeeKobo(total, s) < amount) total += 1;
+  return total;
+}
+
+const PAY_FIELDS = [
+  ['feePercent', 'Percentage fee', '%', 'Charged on every payment.', '0.1'],
+  ['feeFlatNaira', 'Flat fee', '₦', 'Added on top of the percentage for larger payments.', '1'],
+  ['feeFlatThresholdNaira', 'Flat fee applies from', '₦', 'Payments at or above this amount get the flat fee.', '1'],
+  ['feeCapNaira', 'Fee cap', '₦', 'The fee never goes above this.', '1'],
+  ['minPurchaseNaira', 'Minimum purchase', '₦', 'Smallest amount a tenant or owner can buy.', '1'],
+  ['maxPurchaseNaira', 'Maximum purchase', '₦', 'Largest amount in one payment.', '1'],
+  ['auditAfterMinutes', 'Check unconfirmed payments after', 'min', 'If Paystack hasn’t confirmed a payment by then, the server asks Paystack directly.', '1'],
+];
+
+async function paymentSettings(main) {
+  const r = await api('/settings/payments');
+  const canEdit = me.role === 'owner';
+  let saved = r.settings;
+  let s = structuredClone(saved);
+  const options = r.channelOptions;
+  const labelOf = (id) => options.find((o) => o.id === id)?.label ?? id;
+  const dirty = () => JSON.stringify(pick(s)) !== JSON.stringify(pick(saved));
+  const pick = (x) => Object.fromEntries([...PAY_FIELDS.map(([k]) => [k, Number(x[k])]), ['channels', [...x.channels].sort()]]);
+  leaveGuard = dirty;
+
+  const field = ([key, label, unit, hint, step]) => html`
+    <div class="field">
+      <label for="f-${key}">${label}</label>
+      <div class="affix ${unit === '₦' ? 'pre' : 'post'}">
+        ${unit === '₦' ? html`<span>₦</span>` : ''}
+        <input class="input" id="f-${key}" data-key="${key}" type="number" inputmode="decimal" min="0" step="${step}" value="${s[key]}" ${canEdit ? '' : raw('disabled')}>
+        ${unit !== '₦' ? html`<span>${unit}</span>` : ''}
+      </div>
+      <div class="hint">${hint} <span class="muted">Default: ${unit === '₦' ? '₦' : ''}${num(r.defaults[key])}${unit !== '₦' ? ` ${unit}` : ''}</span></div>
+    </div>`;
+
+  render(main, html`
+    <div class="page-head"><div><h1>Payments</h1><p>How tenants and owners pay for power. Changes apply to new payments within a few seconds.</p></div></div>
+    ${canEdit ? '' : html`<div class="card" style="margin-bottom:14px"><p class="muted" style="margin:0">Only account owners can change payment settings.</p></div>`}
+    <div id="pay-err"></div>
+    <div class="grid g2" style="align-items:start">
+      <div class="card">
+        <h2>Payment channels</h2>
+        <div class="field">
+          <label id="ch-label">Channels offered at checkout</label>
+          <div class="ms" id="channels">
+            <button type="button" class="input ms-btn" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="ch-label" ${canEdit ? '' : raw('disabled')}>
+              <span class="ms-val"></span><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div class="ms-pop" role="listbox" aria-multiselectable="true" aria-labelledby="ch-label" hidden>
+              ${options.map((o) => html`<label class="ms-opt"><input type="checkbox" value="${o.id}"> <span>${o.label}</span></label>`)}
+            </div>
+          </div>
+          <div class="hint">The app only shows these, and the server refuses the others. Default: ${r.defaults.channels.map(labelOf).join(', ')}</div>
+        </div>
+        <h2 style="margin-top:22px">Purchase limits</h2>
+        ${PAY_FIELDS.slice(4, 6).map(field)}
+        <h2 style="margin-top:22px">Unconfirmed payments</h2>
+        ${field(PAY_FIELDS[6])}
+      </div>
+      <div class="card">
+        <h2>Service fee</h2>
+        ${PAY_FIELDS.slice(0, 4).map(field)}
+        <div class="example" id="example"></div>
+      </div>
+    </div>
+    <div class="savebar">
+      <span class="grow muted" id="pay-meta"></span>
+      ${canEdit ? html`<button class="btn" type="button" id="pay-reset">Reset to defaults</button><button class="btn primary" type="button" id="pay-save">Save changes</button>` : ''}
+    </div>`);
+
+  const ms = main.querySelector('#channels');
+  const btn = ms.querySelector('.ms-btn');
+  const pop = ms.querySelector('.ms-pop');
+  const boxes = [...pop.querySelectorAll('input')];
+
+  function paint() {
+    boxes.forEach((b) => (b.checked = s.channels.includes(b.value)));
+    render(ms.querySelector('.ms-val'), s.channels.length
+      ? html`${options.filter((o) => s.channels.includes(o.id)).map((o) => html`<span class="chip">${o.label}</span>`)}`
+      : html`<span class="muted">Choose channels</span>`);
+    const ex = (buys) => {
+      const amount = buys * 100;
+      const total = grossUpKobo(amount, s);
+      return html`<tr><td>₦${num(buys)}</td><td class="r num">${naira((total - amount) / 100)}</td><td class="r num">${naira(total / 100)}</td></tr>`;
+    };
+    const valid = PAY_FIELDS.every(([k]) => Number.isFinite(Number(s[k])));
+    render(main.querySelector('#example'), valid
+      ? html`<div class="hint" style="margin:14px 0 8px">What the tenant pays when they cover the fee</div>
+          <div class="table-wrap"><table><thead><tr><th>Buys</th><th class="r">Fee</th><th class="r">Pays</th></tr></thead>
+          <tbody>${[1000, 5000, 20000, 100000].map(ex)}</tbody></table></div>`
+      : '');
+    render(main.querySelector('#pay-meta'), html`${saved.updatedAt ? html`Last changed ${dateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ''}` : 'Using the defaults.'}${dirty() ? html` <span class="pill warn">Unsaved changes</span>` : ''}`);
+  }
+
+  const open = (on) => {
+    pop.hidden = !on;
+    btn.setAttribute('aria-expanded', String(on));
+    if (on) boxes[0]?.focus();
+  };
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    open(pop.hidden);
+  };
+  pop.onclick = (e) => e.stopPropagation();
+  pop.onkeydown = (e) => {
+    if (e.key === 'Escape') {
+      open(false);
+      btn.focus();
+    }
+  };
+  main.onclick = () => open(false); // click outside the dropdown closes it
+  boxes.forEach((b) => (b.onchange = () => {
+    s.channels = options.map((o) => o.id).filter((id) => (id === b.value ? b.checked : s.channels.includes(id)));
+    paint();
+  }));
+  main.querySelectorAll('input[data-key]').forEach((inp) => (inp.oninput = () => {
+    s[inp.dataset.key] = inp.value === '' ? NaN : Number(inp.value);
+    paint();
+  }));
+
+  const showErr = (err) => render(main.querySelector('#pay-err'), err ? html`<div class="err-box">${err}</div>` : '');
+  const apply = (res, msg) => {
+    saved = res.settings;
+    s = structuredClone(saved);
+    main.querySelectorAll('input[data-key]').forEach((inp) => (inp.value = s[inp.dataset.key]));
+    showErr(null);
+    paint();
+    toast(msg);
+  };
+  main.querySelector('#pay-save')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    try {
+      apply(await api('/settings/payments', { method: 'PUT', body: pick(s) }), 'Payment settings saved');
+    } catch (err) {
+      showErr(err.message);
+    } finally {
+      b.disabled = false;
+    }
+  });
+  main.querySelector('#pay-reset')?.addEventListener('click', async () => {
+    if (!confirm('Reset all payment settings to the defaults?')) return;
+    try {
+      apply(await api('/settings/payments/reset', { method: 'POST' }), 'Payment settings reset to defaults');
+    } catch (err) {
+      showErr(err.message);
+    }
+  });
+  paint();
 }
 
 // Helpers

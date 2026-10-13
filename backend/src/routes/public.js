@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db.js';
 import { getContent } from '../services/content.js';
+import { publicPaymentOptions } from '../services/settings.js';
 import { parse } from '../util/http.js';
 import { normalizePhone } from '../util/phone.js';
 import { rateLimit } from '../util/rateLimit.js';
@@ -13,8 +14,15 @@ export const publicRoutes = Router();
 // show up within a minute without hammering the API.
 publicRoutes.get('/content/:key', async (req, res) => {
   const { data, version, updatedAt } = await getContent(req.params.key);
+  // The app also needs the live payment options (enabled channels, limits).
+  const body = req.params.key === 'app' ? { ...data, payments: await publicPaymentOptions() } : data;
   res.set('Cache-Control', 'public, max-age=60');
-  res.json({ data, version, updatedAt });
+  res.json({ data: body, version, updatedAt });
+});
+
+publicRoutes.get('/payment-options', async (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=30');
+  res.json(await publicPaymentOptions());
 });
 
 const leadLimiter = rateLimit({ key: 'lead', limit: 6, windowMs: 60 * 60 * 1000 });

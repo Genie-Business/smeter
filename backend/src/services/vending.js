@@ -13,6 +13,7 @@ import { badRequest, notFound, upstream } from '../util/errors.js';
 import { koboToNaira } from '../util/http.js';
 import { notify } from './notifications.js';
 import { quote } from './pricing.js';
+import { paymentParams } from './settings.js';
 
 const naira = (kobo) => `₦${koboToNaira(kobo).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
 
@@ -20,7 +21,7 @@ export function newReference() {
   return `SM${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`;
 }
 
-export function quoteFor(meter, landlord, amountKobo) {
+export async function quoteFor(meter, landlord, amountKobo, params) {
   return quote({
     amountKobo,
     unitPriceKobo: landlord.unit_price_kobo,
@@ -28,12 +29,16 @@ export function quoteFor(meter, landlord, amountKobo) {
     feeBearer: landlord.fee_bearer,
     debtKobo: meter.debt_kobo,
     debtPercent: meter.debt_recovery_percent,
-  });
+  }, params ?? (await paymentParams()));
 }
 
 export async function createPurchase({ meter, landlord, amountKobo, initiatedBy, email, channel }) {
   if (meter.status !== 'active' && initiatedBy === 'tenant') throw badRequest('This meter is not active yet');
-  const q = quoteFor(meter, landlord, amountKobo);
+  const params = await paymentParams();
+  if (channel && !params.channels.includes(channel)) {
+    throw badRequest('That payment method isn’t available right now. Choose another one.');
+  }
+  const q = await quoteFor(meter, landlord, amountKobo, params);
   const reference = newReference();
   const provider = payments();
 
@@ -52,7 +57,7 @@ export async function createPurchase({ meter, landlord, amountKobo, initiatedBy,
       amountKobo: q.totalKobo,
       email: email || meter.tenant_email || `${meter.meter_id}@tenants.smeter.app`,
       callbackUrl: `${config.publicUrl}/pay/return?reference=${encodeURIComponent(reference)}`,
-      channels: channel ? [channel] : config.payments.channels,
+      channels: channel ? [channel] : params.channels,
       metadata: { meterId: meter.meter_id, landlordId: landlord.id, units: q.units },
       split: landlord.settlement_ref
         ? {
@@ -115,7 +120,7 @@ export async function settlePayment(reference, { source = 'callback' } = {}) {
       await notify({
         recipientType: 'landlord', recipientId: purchase.landlord_id, kind: 'audit',
         title: 'Late payment reconciled',
-        body: `No webhook arrived for ${reference} within ${config.payments.auditAfterMinutes} minutes; it was verified and reconciled automatically.`,
+        body: `No webhook arrived for ${reference} within ${(await paymentParams()).auditAfterMinutes} minutes; it was verified and reconciled automatically.`,
       });
     }
     await vend(reference);

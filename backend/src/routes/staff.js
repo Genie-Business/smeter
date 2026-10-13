@@ -9,6 +9,9 @@ import { requireStaff } from '../auth/middleware.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { signAccessToken } from '../auth/tokens.js';
 import { contentHistory, getContent, resetContent, restoreContent, saveContent } from '../services/content.js';
+import {
+  PAYMENT_CHANNELS, getPaymentSettings, paymentSettingsDefaults, resetPaymentSettings, savePaymentSettings,
+} from '../services/settings.js';
 import { liveReading } from '../services/usage.js';
 import { landlordPurchaseDto } from '../services/vending.js';
 import { badRequest, conflict, notFound, unauthorized } from '../util/errors.js';
@@ -316,6 +319,27 @@ staffRoutes.post('/content/:key/restore', async (req, res) => {
 staffRoutes.post('/content/:key/reset', async (req, res) => {
   const saved = await resetContent(req.params.key, req.staff.id);
   res.json({ ...saved, history: await contentHistory(req.params.key) });
+});
+
+// ---- Payment settings -----------------------------------------------------------------
+// Everyone on the team can view; only account owners can change them.
+
+const paymentSettingsResponse = (settings) => ({
+  settings,
+  defaults: paymentSettingsDefaults(),
+  channelOptions: PAYMENT_CHANNELS,
+});
+
+staffRoutes.get('/settings/payments', async (_req, res) => {
+  res.json(paymentSettingsResponse(await getPaymentSettings({ fresh: true })));
+});
+
+staffRoutes.put('/settings/payments', requireStaff({ role: 'owner' }), async (req, res) => {
+  res.json(paymentSettingsResponse(await savePaymentSettings(req.body ?? {}, req.staff.id)));
+});
+
+staffRoutes.post('/settings/payments/reset', requireStaff({ role: 'owner' }), async (_req, res) => {
+  res.json(paymentSettingsResponse(await resetPaymentSettings()));
 });
 
 // Image upload for content fields. Raw body; type sniffed from magic bytes.

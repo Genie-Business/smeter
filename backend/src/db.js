@@ -174,6 +174,15 @@ CREATE TABLE IF NOT EXISTS content_history (
   created_at  TEXT NOT NULL DEFAULT ${NOW}
 );
 
+-- Operational settings edited in the admin dashboard (e.g. 'payments'),
+-- stored as JSON overrides over the env defaults.
+CREATE TABLE IF NOT EXISTS settings (
+  key         TEXT PRIMARY KEY,
+  data        TEXT NOT NULL,
+  updated_by  INTEGER,
+  updated_at  TEXT NOT NULL DEFAULT ${NOW}
+);
+
 -- Images uploaded from the admin dashboard, served at /uploads/:name. Stored in
 -- the database because serverless hosts have no persistent disk.
 CREATE TABLE IF NOT EXISTS uploads (

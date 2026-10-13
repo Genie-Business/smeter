@@ -86,13 +86,14 @@ tenantRoutes.get('/usage', async (req, res) => {
 });
 
 const amountBody = z.object({ amount: z.coerce.number().positive('Enter an amount') });
+// Enabled channels are checked against the admin's payment settings at purchase time.
 export const channelField = z.enum(['card', 'bank_transfer', 'ussd']).optional();
 
 // Tariff visibility + fee breakdown before confirming (features 10, SM-PAY-004).
 tenantRoutes.post('/quote', async (req, res) => {
   const { amount } = parse(amountBody, req.body);
   const landlord = await landlordOf(req.meter);
-  res.json({ quote: quoteDto(quoteFor(req.meter, landlord, nairaToKobo(amount))), unitPrice: koboToNaira(landlord.unit_price_kobo) });
+  res.json({ quote: quoteDto(await quoteFor(req.meter, landlord, nairaToKobo(amount))), unitPrice: koboToNaira(landlord.unit_price_kobo) });
 });
 
 tenantRoutes.post('/purchases', async (req, res) => {

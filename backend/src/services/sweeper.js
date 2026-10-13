@@ -2,12 +2,13 @@
 //  - pending payments with no webhook after N minutes are verified directly
 //    with the gateway (the "audit alert" path);
 //  - paid purchases whose token generation failed are retried.
-import { config } from '../config.js';
 import { db, now } from '../db.js';
+import { paymentParams } from './settings.js';
 import { settlePayment, vend } from './vending.js';
 
 export async function sweepOnce() {
-  const auditBefore = new Date(Date.now() - config.payments.auditAfterMinutes * 60 * 1000).toISOString();
+  const { auditAfterMinutes } = await paymentParams();
+  const auditBefore = new Date(Date.now() - auditAfterMinutes * 60 * 1000).toISOString();
   const abandonBefore = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const stale = await db().all(

@@ -175,3 +175,57 @@ test('image uploads are type-checked', async () => {
   });
   assert.equal(bad.status, 400);
 });
+
+test('payment settings: owners edit, editors view, changes reach pricing and checkout', async () => {
+  resetRateLimits();
+  const view = await api.call('GET', '/v1/staff/settings/payments', { token: editorToken });
+  assert.equal(view.status, 200, view.text);
+  assert.deepEqual(view.body.settings.channels, ['card', 'bank_transfer', 'ussd']);
+  assert.equal(view.body.settings.feePercent, 1.5);
+  assert.equal(view.body.channelOptions.length, 3);
+
+  const next = { ...view.body.defaults, channels: ['card', 'ussd'], feePercent: 2, feeFlatNaira: 0, minPurchaseNaira: 1000 };
+  const editorSave = await api.call('PUT', '/v1/staff/settings/payments', { token: editorToken, body: next });
+  assert.equal(editorSave.status, 403);
+
+  const invalid = await api.call('PUT', '/v1/staff/settings/payments', { token: staffToken, body: { ...next, channels: [] } });
+  assert.equal(invalid.status, 400);
+  assert.match(invalid.body.error.message, /at least one payment channel/);
+  const backwards = await api.call('PUT', '/v1/staff/settings/payments', { token: staffToken, body: { ...next, minPurchaseNaira: 9_000_000 } });
+  assert.equal(backwards.status, 400);
+  assert.equal((await api.call('PUT', '/v1/staff/settings/payments', { token: staffToken, body: { ...next, channels: ['cash'] } })).status, 400);
+
+  const saved = await api.call('PUT', '/v1/staff/settings/payments', { token: staffToken, body: next });
+  assert.equal(saved.status, 200, saved.text);
+  assert.deepEqual(saved.body.settings.channels, ['card', 'ussd']);
+  assert.equal(saved.body.settings.updatedBy, 'Ops Owner');
+
+  // The app sees the new options.
+  const opts = await api.call('GET', '/v1/public/payment-options');
+  assert.deepEqual(opts.body, { channels: ['card', 'ussd'], minPurchase: 1000, maxPurchase: 500000 });
+  const appContent = await api.call('GET', '/v1/public/content/app');
+  assert.deepEqual(appContent.body.data.payments.channels, ['card', 'ussd']);
+
+  // Pricing and checkout use them: tenant on the seeded meter.
+  const start = await api.call('POST', '/v1/auth/tenant/start', { body: { meterId: '47009990001' } });
+  const verify = await api.call('POST', '/v1/auth/tenant/verify', { body: { meterId: '47009990001', code: start.body.devCode } });
+  const tenant = verify.body.token;
+  const tooSmall = await api.call('POST', '/v1/tenant/quote', { token: tenant, body: { amount: 800 } });
+  assert.equal(tooSmall.status, 400);
+  assert.match(tooSmall.body.error.message, /Minimum purchase is ₦1000/);
+  const q = await api.call('POST', '/v1/tenant/quote', { token: tenant, body: { amount: 5000 } });
+  assert.equal(q.status, 200, q.text);
+  // 2% with no flat fee, grossed up to ₦5,102.04 (fee ₦102.04) so ₦5,000 arrives
+  assert.equal(q.body.quote.total, 5102.04);
+  const transfer = await api.call('POST', '/v1/tenant/purchases', { token: tenant, body: { amount: 5000, channel: 'bank_transfer' } });
+  assert.equal(transfer.status, 400);
+  assert.match(transfer.body.error.message, /isn’t available/);
+  const card = await api.call('POST', '/v1/tenant/purchases', { token: tenant, body: { amount: 5000, channel: 'card' } });
+  assert.equal(card.status, 201, card.text);
+
+  // Reset restores the env defaults.
+  const reset = await api.call('POST', '/v1/staff/settings/payments/reset', { token: staffToken });
+  assert.equal(reset.status, 200);
+  assert.deepEqual(reset.body.settings.channels, ['card', 'bank_transfer', 'ussd']);
+  assert.equal(reset.body.settings.updatedAt, null);
+});
