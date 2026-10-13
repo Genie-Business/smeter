@@ -56,6 +56,7 @@
   --gap: 13px;
   --pitch: 282.5px;
   --r: 22px;
+  --float-gap: 12px;
 
   --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -338,8 +339,33 @@ html.intro .hero h1 .ln > span { transform: translateY(110%); }
 
 /* Inner pages */
 
-body.page .hdr { position: sticky; top: 0; margin: 0 clamp(10px, 3vw, 40px); }
+body.page .hdr {
+  position: sticky; top: var(--float-gap); margin: var(--float-gap) clamp(10px, 3vw, 40px) 0; border-radius: var(--r);
+  box-shadow: 0 0 0 1px var(--nav-line), 0 18px 40px -22px rgba(15, 15, 14, 0.35);
+}
 html.mob body.page .hdr .hmain { height: var(--hh); }
+
+/* Floating copy of the landing header, shown once the original scrolls away */
+html body .hdr.floating {
+  position: fixed; z-index: 45; top: var(--float-gap); left: clamp(10px, 3vw, 40px); right: clamp(10px, 3vw, 40px);
+  margin: 0; border-radius: var(--r);
+  box-shadow: 0 0 0 1px var(--nav-line), 0 18px 40px -22px rgba(15, 15, 14, 0.35);
+  transform: translateY(calc(-100% - 2 * var(--float-gap))); transition: transform 0.45s var(--ease-expo);
+}
+html body .hdr.floating.on { transform: none; }
+html.desk .hdr.floating .hmain, html.tab .hdr.floating .hmain,
+html.desk body.page .hdr .hmain, html.tab body.page .hdr .hmain { height: 80px; }
+html.desk .hdr.floating .pill, html.tab .hdr.floating .pill,
+html.desk body.page .hdr .pill, html.tab body.page .hdr .pill { height: 54px; }
+html.desk .hdr.floating .circle, html.tab .hdr.floating .circle,
+html.desk body.page .hdr .circle, html.tab body.page .hdr .circle { width: 54px; height: 54px; }
+/* Anchor jumps stop below the floating header. */
+html { scroll-padding-top: calc(80px + 3 * var(--float-gap)); }
+html.mob { scroll-padding-top: calc(var(--hh) + 3 * var(--float-gap)); }
+html.mob .hdr.floating .hmain { padding-top: 0; }
+@media (prefers-reduced-motion: reduce) { html body .hdr.floating { transition: none; } }
+/* The floating header carries "Get the app" on tablet and desktop. */
+html:not(.mob) .float-cta { display: none; }
 .wrap { width: min(1200px, calc(100vw - 2 * clamp(16px, 4vw, 40px))); margin: 0 auto; }
 .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--purple); }
 .eyebrow::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }

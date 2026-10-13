@@ -38,33 +38,60 @@
     [...col.children].forEach((cell) => col.appendChild(cell.cloneNode(true)));
   });
 
-  // Menu (mobile / tablet)
+  // Floating header. Inner pages: the header itself is sticky (CSS). Landing:
+  // the header is part of the first-screen composition, so a copy floats in
+  // once the original has scrolled out of view.
   const hdr = document.querySelector('.hdr');
-  const menuBtn = document.querySelector('.menu-btn');
-  function setMenu(open) {
-    if (!hdr || !menuBtn) return;
-    if (open) hdr.setAttribute('data-open', '');
-    else hdr.removeAttribute('data-open');
-    menuBtn.setAttribute('aria-expanded', String(open));
-    if (open) hdr.querySelector('.panel nav a')?.focus({ preventScroll: true });
+  let floatHdr = null;
+  if (isLanding && hdr) {
+    floatHdr = hdr.cloneNode(true);
+    floatHdr.classList.add('floating');
+    floatHdr.inert = true;
+    const panel = floatHdr.querySelector('.panel');
+    if (panel) panel.id = 'menu-panel-float';
+    floatHdr.querySelector('.menu-btn')?.setAttribute('aria-controls', 'menu-panel-float');
+    document.body.appendChild(floatHdr);
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(([e]) => {
+        const on = !e.isIntersecting;
+        floatHdr.classList.toggle('on', on);
+        floatHdr.inert = !on;
+        if (!on) setMenu(floatHdr, false);
+      }).observe(hdr);
+    }
   }
-  menuBtn?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    setMenu(!hdr.hasAttribute('data-open'));
+
+  // Menu (mobile / tablet), in whichever header it was opened from
+  const headers = [hdr, floatHdr].filter(Boolean);
+  function setMenu(h, open) {
+    const btn = h.querySelector('.menu-btn');
+    if (!btn) return;
+    if (open) h.setAttribute('data-open', '');
+    else h.removeAttribute('data-open');
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) h.querySelector('.panel nav a')?.focus({ preventScroll: true });
+  }
+  headers.forEach((h) => {
+    h.querySelector('.menu-btn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setMenu(h, !h.hasAttribute('data-open'));
+    });
+    h.querySelectorAll('.panel a').forEach((a) => a.addEventListener('click', () => setMenu(h, false)));
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      if (hdr?.hasAttribute('data-open')) {
-        setMenu(false);
-        menuBtn.focus();
-      }
+      headers.forEach((h) => {
+        if (h.hasAttribute('data-open')) {
+          setMenu(h, false);
+          h.querySelector('.menu-btn')?.focus();
+        }
+      });
       closeSheet();
     }
   });
   document.addEventListener('click', (e) => {
-    if (hdr?.hasAttribute('data-open') && !hdr.contains(e.target)) setMenu(false);
+    headers.forEach((h) => h.hasAttribute('data-open') && !h.contains(e.target) && setMenu(h, false));
   });
-  hdr?.querySelectorAll('.panel a').forEach((a) => a.addEventListener('click', () => setMenu(false)));
 
   // Load entrance (landing)
   if (isLanding && html.classList.contains('intro')) runIntro();
