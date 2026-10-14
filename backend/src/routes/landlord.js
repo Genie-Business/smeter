@@ -258,15 +258,20 @@ landlordRoutes.post('/meters', async (req, res) => {
   // Validate the hardware id against the manufacturer's records, then bind it
   // to a customer + this landlord's tariff on the head-end.
   const client = geni();
-  const customerId = `SMC${body.meterId}`;
+  let customerId = `SMC${body.meterId}`;
   let info;
   try {
     info = await client.getMeter(body.meterId);
     if (!info) throw badRequest("We couldn't find that meter serial number. Check the number on the meter.");
     const tariffId = await syncTariff(req.landlord);
-    const name = [body.tenantFirstName, body.tenantLastName].filter(Boolean).join(' ') || `Apt ${body.apartment || body.meterId}`;
-    await client.upsertCustomer({ customerId, customerName: name, phone: tenantPhone, address: body.address });
-    await client.bindAccount({ customerId, meterId: body.meterId, region: body.address.slice(0, 60), tariffId });
+    // A meter already on the head-end keeps its account and customer; only new
+    // meters get a smeter customer record.
+    const account = await client.getAccount(body.meterId);
+    if (!account) {
+      const name = [body.tenantFirstName, body.tenantLastName].filter(Boolean).join(' ') || `Apt ${body.apartment || body.meterId}`;
+      await client.upsertCustomer({ customerId, customerName: name, phone: tenantPhone, address: body.address });
+    }
+    customerId = await client.bindAccount({ customerId, meterId: body.meterId, region: body.address.slice(0, 60), tariffId }, account);
   } catch (err) {
     throw asUpstream(err);
   }

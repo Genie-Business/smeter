@@ -44,8 +44,11 @@ export class MockGeniClient {
     this.customers.set(c.customerId, c);
   }
 
-  async bindAccount(a) {
-    this.accounts.set(String(a.meterId), a);
+  async bindAccount(a, existing) {
+    const account = existing === undefined ? this.accounts.get(String(a.meterId)) : existing;
+    const billedTo = account?.customerId ?? a.customerId;
+    this.accounts.set(String(a.meterId), { ...a, customerId: billedTo });
+    return billedTo;
   }
 
   async upsertTariff(t) {

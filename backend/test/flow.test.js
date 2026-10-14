@@ -353,3 +353,21 @@ test('checkout return page handles the reference Paystack appends a second time'
   const s = await api.call('GET', `/v1/tenant/purchases/${p.body.reference}`, { token: tenantToken });
   assert.equal(s.body.purchase.status, 'vended');
 });
+
+test('a meter already on the head-end keeps its account and customer; only the tariff changes', async () => {
+  resetRateLimits();
+  const meterId = '47300622941';
+  geni().accounts.set(meterId, { customerId: 'test', meterId, tariffId: 'test', region: 'admin' });
+  const customersBefore = geni().customers.size;
+  const add = await api.call('POST', '/v1/landlord/meters', {
+    token: landlordToken,
+    body: { meterId, address: '5 Existing Close, Yaba', tenantPhone: '08025556666', tenantEmail: 'existing@example.com', deliveryMode: 'manual' },
+  });
+  assert.equal(add.status, 201, add.text);
+  const account = geni().accounts.get(meterId);
+  assert.equal(account.customerId, 'test', 'existing customer kept');
+  assert.notEqual(account.tariffId, 'test', 'moved to the owner tariff');
+  assert.equal(geni().customers.size, customersBefore, 'no new customer record');
+  const row = await db().get('SELECT customer_id FROM meters WHERE meter_id = ?', meterId);
+  assert.equal(row.customer_id, 'test');
+});

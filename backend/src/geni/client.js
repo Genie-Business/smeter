@@ -113,10 +113,30 @@ export class GeniClient {
     await this.raw(exists ? '/API/Customer/Update' : '/API/Customer/Create', [row]);
   }
 
-  async bindAccount({ customerId, meterId, region, tariffId }) {
-    const row = this.base({ customerId, meterId, region, tariffId, remark: 'smeter' });
-    const existing = await this.getAccount(meterId);
-    await this.raw(existing ? '/API/Account/Update' : '/API/Account/Create', [row]);
+  /**
+   * Put the meter on `tariffId`. An account is keyed by customer + meter, so a
+   * meter that already has an account keeps it (and its customer); only its
+   * tariff and region change. Returns the customer id the meter is billed under.
+   */
+  async bindAccount({ customerId, meterId, region, tariffId }, existing) {
+    const account = existing === undefined ? await this.getAccount(meterId) : existing;
+    const billedTo = account?.customerId ?? customerId;
+    // "region" refers to a head-end region record (by default the operator
+    // user), not a free-text address: keep an existing account's region, and
+    // use the operator's for new accounts.
+    const row = this.base({
+      customerId: billedTo,
+      meterId,
+      region: account?.region || this.cfg.region || this.cfg.userId || region,
+      tariffId,
+      // Required by the head-end on update (it errors without them, although the
+      // API collection doesn't list them): the second-rate tariff and CT ratio.
+      tariffS2: tariffId,
+      ctRatio: account?.ctRatio ?? '1',
+      remark: 'smeter',
+    });
+    await this.raw(account ? '/API/Account/Update' : '/API/Account/Create', [row]);
+    return billedTo;
   }
 
   async upsertTariff({ tariffId, tariffName, price, tax = 0 }) {
