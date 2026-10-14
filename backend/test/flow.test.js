@@ -371,3 +371,42 @@ test('a meter already on the head-end keeps its account and customer; only the t
   const row = await db().get('SELECT customer_id FROM meters WHERE meter_id = ?', meterId);
   assert.equal(row.customer_id, 'test');
 });
+
+test('new owners get a tariff id from the configured prefix; stored ids keep working', async () => {
+  resetRateLimits();
+  const { saveGeniSettings, resetGeniSettings } = await import('../src/services/settings.js');
+  const before = await db().get('SELECT id, tariff_id FROM landlords ORDER BY id LIMIT 1');
+  assert.match(before.tariff_id, /^SML\d{6}$/, 'default prefix');
+
+  await saveGeniSettings({ mode: 'mock', baseUrl: 'http://8.208.24.83:9200', company: 'Geni', userId: '', tariffPrefix: 'stg' }, null);
+  try {
+    const reg = await api.call('POST', '/v1/auth/landlord/register', {
+      body: { fullName: 'Prefix Owner', email: 'prefix@example.com', phone: '08037770000', password: 'correct-horse' },
+    });
+    assert.equal(reg.status, 201, reg.text);
+    const token = reg.body.token;
+    const add = await api.call('POST', '/v1/landlord/meters', {
+      token,
+      body: { meterId: '47001234571', address: '1 Prefix Road, Yaba', tenantPhone: '08025550001', tenantEmail: 'p1@example.com', deliveryMode: 'manual' },
+    });
+    assert.equal(add.status, 201, add.text);
+    const row = await db().get('SELECT id, tariff_id FROM landlords WHERE email = ?', 'prefix@example.com');
+    assert.equal(row.tariff_id, `STG${String(row.id).padStart(6, '0')}`);
+    assert.ok(geni().tariffs.has(row.tariff_id));
+
+    // The first owner's stored id is untouched and still used when they re-sync.
+    const set = await api.call('PUT', '/v1/landlord/tariff', { token: landlordToken, body: { unitPrice: 231 } });
+    assert.equal(set.status, 200, set.text);
+    assert.equal((await db().get('SELECT tariff_id FROM landlords WHERE id = ?', before.id)).tariff_id, before.tariff_id);
+    assert.equal(geni().tariffs.get(before.tariff_id).price, 231);
+  } finally {
+    await resetGeniSettings();
+  }
+});
+
+test('a bad tariff prefix is rejected', async () => {
+  const { mergeGeniInput } = await import('../src/services/settings.js');
+  const base = { mode: 'mock', baseUrl: 'http://8.208.24.83:9200', company: 'Geni', userId: '' };
+  await assert.rejects(mergeGeniInput({ ...base, tariffPrefix: 'TOO-LONG-PREFIX' }));
+  await assert.rejects(mergeGeniInput({ ...base, tariffPrefix: '' }));
+});

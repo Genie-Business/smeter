@@ -157,6 +157,7 @@ Paystack webhook settle payments as they happen either way.
 | Variable | What |
 |---|---|
 | `GENI_USER_ID`, `GENI_PASSWORD`, `GENI_COMPANY` | Head-end login (`/API/User/Login`) |
+| `GENI_TARIFF_PREFIX` | Prefix of owner tariff ids on the head-end (default `SML`); give each environment sharing a head-end its own |
 | `GENI_AUTHORIZATION_PASSWORD` | Required by `/API/Token/CreditToken/Generate` |
 | `GENI_TOKEN_TASK_PROTOCOL_ID`, `GENI_DISCONNECT_*`, `GENI_RECONNECT_*` | Remote-task protocol ids/payloads for these meters — confirm with the vendor |
 | `PAYSTACK_SECRET_KEY` | Checkout, webhooks (`POST /v1/webhooks/paystack`), bank resolution, subaccounts |

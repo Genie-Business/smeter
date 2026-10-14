@@ -156,13 +156,30 @@ export class GeniClient {
       serialNumber,
     }));
     if (!r?.token) throw new GeniError('Token generation returned no token');
+    let receiptId = String(r.receiptId ?? '');
+    // The head-end sometimes answers a real vend with receiptId 0; the record has the real one.
+    if (!receiptId || receiptId === '0') receiptId = (await this.findReceiptId({ meterId, token: r.token })) ?? receiptId;
     return {
-      receiptId: String(r.receiptId ?? ''),
+      receiptId,
       token: String(r.token),
       units: Number(r.totalUnit ?? 0),
       totalPaid: Number(r.totalPaid ?? amountNaira),
       tax: Number(r.tax ?? 0),
     };
+  }
+
+  /** Receipt id of the credit-token record for this meter + token, or null (never throws). */
+  async findReceiptId({ meterId, token }) {
+    const digits = (t) => String(t).replace(/\D/g, '');
+    try {
+      const result = await this.raw('/API/Token/CreditTokenRecord/Read', this.base({ meterId, pageNumber: 1, pageSize: 20 }));
+      const hit = (result?.data ?? [])
+        .filter((row) => String(row.meterId) === String(meterId) && digits(row.token) === digits(token))
+        .sort((a, b) => Number(b.receiptId) - Number(a.receiptId))[0];
+      return hit && Number(hit.receiptId) > 0 ? String(hit.receiptId) : null;
+    } catch {
+      return null;
+    }
   }
 
   async pushToken({ customerId, meterId, token }) {

@@ -229,15 +229,20 @@ const geniEnvDefaults = () => ({
   mode: config.geni.mode,
   baseUrl: config.geni.baseUrl,
   company: config.geni.company,
+  tariffPrefix: config.geni.tariffPrefix,
   userId: config.geni.userId,
   password: config.geni.password,
   authorizationPassword: config.geni.authorizationPassword,
 });
 
+/** Prefix of owner tariff ids on the head-end; short so the id stays well inside its length limit. */
+const TARIFF_PREFIX = z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/, 'Tariff prefix must be 1–8 letters or digits').transform((p) => p.toUpperCase());
+
 export const geniSettingsSchema = z.object({
   mode: z.enum(['live', 'mock']),
   baseUrl: z.string().trim().url('Enter the head-end address, e.g. http://8.208.24.83:9200').max(200).transform((u) => u.replace(/\/+$/, '')),
   company: z.string().trim().min(1, 'Enter the company').max(80),
+  tariffPrefix: TARIFF_PREFIX.optional(),
   userId: z.string().trim().max(80),
   password: z.string().max(200).optional(),
   authorizationPassword: z.string().max(200).optional(),
@@ -276,6 +281,7 @@ export async function mergeGeniInput(input) {
   const current = await getGeniSettings({ fresh: true });
   const next = { ...parsed.data };
   for (const f of GENI_SECRET_FIELDS) if (!next[f]) next[f] = current[f];
+  next.tariffPrefix ??= current.tariffPrefix;
   if (next.mode === 'live' && !(next.userId && next.password)) {
     throw badRequest('Enter the head-end username and password to use the real head-end');
   }

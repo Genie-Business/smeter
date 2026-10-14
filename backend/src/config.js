@@ -71,6 +71,8 @@ export const config = {
     mode: geniMode, // 'live' | 'mock'
     baseUrl: (env.GENI_BASE_URL ?? 'http://8.208.24.83:9200').replace(/\/$/, ''),
     company: env.GENI_COMPANY ?? 'Geni',
+    // Owner tariff ids are <prefix><landlord id>. Environments sharing one head-end need distinct prefixes.
+    tariffPrefix: (env.GENI_TARIFF_PREFIX ?? 'SML').trim(),
     userId: env.GENI_USER_ID ?? '',
     password: env.GENI_PASSWORD ?? '',
     // Separate "authorization password" the head-end requires to mint tokens.

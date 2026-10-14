@@ -23,6 +23,7 @@ function current() {
     mode: config.geni.mode,
     baseUrl: config.geni.baseUrl,
     company: config.geni.company,
+    tariffPrefix: config.geni.tariffPrefix,
     userId: config.geni.userId,
     password: config.geni.password,
     authorizationPassword: config.geni.authorizationPassword,

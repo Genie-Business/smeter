@@ -1026,6 +1026,7 @@ async function geniSettings(main) {
         </div>
         <div class="field"><label for="g-url">API address</label><input class="input" id="g-url" placeholder="http://8.208.24.83:9200"><div class="hint">The API port, not the website (usually :9200).</div></div>
         <div class="field"><label for="g-company">Company</label><input class="input" id="g-company"></div>
+        <div class="field"><label for="g-prefix">Tariff id prefix</label><input class="input" id="g-prefix" maxlength="8" placeholder="SML"><div class="hint">Owner tariffs on the head-end are named prefix + owner number. Give each environment sharing this head-end its own prefix (e.g. SML, STG, DEV). Owners that already have a tariff keep theirs.</div></div>
         <div class="field"><label for="g-user">Username</label><input class="input" id="g-user" autocomplete="off"></div>
         <div class="field"><label for="g-pass">Password</label><input class="input" id="g-pass" type="password" autocomplete="new-password"><div class="hint" id="g-pass-hint"></div></div>
         <div class="field"><label for="g-auth">Authorization password</label><input class="input" id="g-auth" type="password" autocomplete="new-password"><div class="hint" id="g-auth-hint"></div></div>
@@ -1047,6 +1048,7 @@ async function geniSettings(main) {
     $('#g-mode').value = saved.mode;
     $('#g-url').value = saved.baseUrl;
     $('#g-company').value = saved.company;
+    $('#g-prefix').value = saved.tariffPrefix;
     $('#g-user').value = saved.userId;
     $('#g-pass').value = '';
     $('#g-auth').value = '';
@@ -1057,7 +1059,7 @@ async function geniSettings(main) {
     render($('#geni-meta'), html`${saved.updatedAt ? `Last changed ${dateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ''}` : 'Using the server defaults.'} · <span class="pill ${saved.mode === 'live' ? 'ok' : 'warn'}">${saved.mode === 'live' ? 'Real head-end' : 'Simulated'}</span>`);
   };
   const body = () => {
-    const b = { mode: $('#g-mode').value, baseUrl: $('#g-url').value, company: $('#g-company').value, userId: $('#g-user').value };
+    const b = { mode: $('#g-mode').value, baseUrl: $('#g-url').value, company: $('#g-company').value, tariffPrefix: $('#g-prefix').value, userId: $('#g-user').value };
     if ($('#g-pass').value) b.password = $('#g-pass').value;
     if ($('#g-auth').value) b.authorizationPassword = $('#g-auth').value;
     return b;
@@ -1065,7 +1067,7 @@ async function geniSettings(main) {
   const showErr = (err) => render($('#geni-err'), err ? html`<div class="err-box">${err}</div>` : '');
   leaveGuard = () => {
     const b = body();
-    return b.mode !== saved.mode || b.baseUrl.replace(/\/+$/, '') !== saved.baseUrl || b.company !== saved.company || b.userId !== saved.userId || 'password' in b || 'authorizationPassword' in b;
+    return b.mode !== saved.mode || b.baseUrl.replace(/\/+$/, '') !== saved.baseUrl || b.company !== saved.company || b.tariffPrefix.trim().toUpperCase() !== saved.tariffPrefix || b.userId !== saved.userId || 'password' in b || 'authorizationPassword' in b;
   };
   $('#g-test').onclick = async (e) => {
     const btn = e.currentTarget;

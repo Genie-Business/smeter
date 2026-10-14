@@ -9,7 +9,7 @@ import { geni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
 import { codeEmail, inviteEmail, maskEmail, sendEmail } from '../providers/email.js';
 import { listNotifications, markAllRead, notify, unreadCount } from '../services/notifications.js';
-import { getTariffSettings } from '../services/settings.js';
+import { getGeniSettings, getTariffSettings } from '../services/settings.js';
 import { liveReading } from '../services/usage.js';
 import { createPurchase, getPurchase, landlordPurchaseDto, settlePayment, vend } from '../services/vending.js';
 import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
@@ -21,11 +21,12 @@ export const landlordRoutes = Router();
 landlordRoutes.use(requireLandlord());
 
 const reload = (id) => db().get('SELECT * FROM landlords WHERE id = ?', id);
-const tariffIdFor = (landlord) => landlord.tariff_id ?? `SML${String(landlord.id).padStart(6, '0')}`;
+// A stored tariff_id always wins, so landlords created before prefixes existed keep theirs.
+const tariffIdFor = (landlord, prefix) => landlord.tariff_id ?? `${prefix}${String(landlord.id).padStart(6, '0')}`;
 
 /** Make sure the landlord's tariff exists on the head-end with their price. */
 async function syncTariff(landlord) {
-  const tariffId = tariffIdFor(landlord);
+  const tariffId = tariffIdFor(landlord, (await getGeniSettings()).tariffPrefix);
   const { baseUnitCostNaira } = await getTariffSettings();
   const price = koboToNaira(landlord.unit_price_kobo || Math.round(baseUnitCostNaira * 100));
   await geni().upsertTariff({ tariffId, tariffName: `${landlord.full_name} (smeter)`.slice(0, 60), price, tax: 0 });
