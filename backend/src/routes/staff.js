@@ -10,7 +10,8 @@ import { hashPassword, verifyPassword } from '../auth/password.js';
 import { signAccessToken } from '../auth/tokens.js';
 import { contentHistory, getContent, resetContent, restoreContent, saveContent } from '../services/content.js';
 import {
-  PAYMENT_CHANNELS, getPaymentSettings, paymentSettingsDefaults, resetPaymentSettings, savePaymentSettings,
+  PAYMENT_CHANNELS, getPaymentSettings, getTariffSettings, paymentSettingsDefaults, resetPaymentSettings,
+  resetTariffSettings, savePaymentSettings, saveTariffSettings, tariffImpact, tariffSettingsDefaults, tariffSettingsSchema,
 } from '../services/settings.js';
 import { liveReading } from '../services/usage.js';
 import { landlordPurchaseDto } from '../services/vending.js';
@@ -340,6 +341,32 @@ staffRoutes.put('/settings/payments', requireStaff({ role: 'owner' }), async (re
 
 staffRoutes.post('/settings/payments/reset', requireStaff({ role: 'owner' }), async (_req, res) => {
   res.json(paymentSettingsResponse(await resetPaymentSettings()));
+});
+
+// Unit price limits (owners set their own price between these).
+const tariffSettingsResponse = async (settings) => ({
+  settings,
+  defaults: tariffSettingsDefaults(),
+  impact: await tariffImpact(settings),
+});
+
+staffRoutes.get('/settings/tariff', async (_req, res) => {
+  res.json(await tariffSettingsResponse(await getTariffSettings({ fresh: true })));
+});
+
+// ?preview: report the impact of unsaved values without saving.
+staffRoutes.post('/settings/tariff/preview', async (req, res) => {
+  const parsed = tariffSettingsSchema.safeParse(req.body ?? {});
+  if (!parsed.success) throw badRequest(parsed.error.issues[0].message);
+  res.json({ impact: await tariffImpact(parsed.data) });
+});
+
+staffRoutes.put('/settings/tariff', requireStaff({ role: 'owner' }), async (req, res) => {
+  res.json(await tariffSettingsResponse(await saveTariffSettings(req.body ?? {}, req.staff.id)));
+});
+
+staffRoutes.post('/settings/tariff/reset', requireStaff({ role: 'owner' }), async (_req, res) => {
+  res.json(await tariffSettingsResponse(await resetTariffSettings()));
 });
 
 // Image upload for content fields. Raw body; type sniffed from magic bytes.

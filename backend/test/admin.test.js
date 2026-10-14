@@ -229,3 +229,40 @@ test('payment settings: owners edit, editors view, changes reach pricing and che
   assert.deepEqual(reset.body.settings.channels, ['card', 'bank_transfer', 'ussd']);
   assert.equal(reset.body.settings.updatedAt, null);
 });
+
+test('unit price limits: owners edit, limits reach owners, impact is reported', async () => {
+  resetRateLimits();
+  const view = await api.call('GET', '/v1/staff/settings/tariff', { token: editorToken });
+  assert.equal(view.status, 200, view.text);
+  assert.deepEqual(view.body.defaults, { maxUnitPriceNaira: 250, baseUnitCostNaira: 209.5 });
+  assert.equal(view.body.impact.priced, 1); // Ada priced at ₦230
+
+  assert.equal((await api.call('PUT', '/v1/staff/settings/tariff', { token: editorToken, body: { maxUnitPriceNaira: 300, baseUnitCostNaira: 200 } })).status, 403);
+  const inverted = await api.call('PUT', '/v1/staff/settings/tariff', { token: staffToken, body: { maxUnitPriceNaira: 200, baseUnitCostNaira: 210 } });
+  assert.equal(inverted.status, 400);
+  assert.match(inverted.body.error.message, /below the maximum/);
+
+  // Preview: a utility cost above Ada's price would stop her tenants buying.
+  const preview = await api.call('POST', '/v1/staff/settings/tariff/preview', { token: editorToken, body: { maxUnitPriceNaira: 300, baseUnitCostNaira: 240 } });
+  assert.equal(preview.body.impact.belowCost, 1);
+
+  const saved = await api.call('PUT', '/v1/staff/settings/tariff', { token: staffToken, body: { maxUnitPriceNaira: 300, baseUnitCostNaira: 200 } });
+  assert.equal(saved.status, 200, saved.text);
+  assert.equal(saved.body.settings.updatedBy, 'Ops Owner');
+  assert.deepEqual(saved.body.impact, { aboveMax: 0, belowCost: 0, priced: 1 });
+
+  // The owner sees and is held to the new limits.
+  const login = await api.call('POST', '/v1/auth/landlord/login', { body: { identifier: 'ada@example.com', password: 'correct-horse' } });
+  const owner = login.body.token;
+  const me = await api.call('GET', '/v1/landlord/me', { token: owner });
+  assert.deepEqual(me.body.landlord.tariffLimits, { max: 300, baseCost: 200 });
+  assert.equal((await api.call('PUT', '/v1/landlord/tariff', { token: owner, body: { unitPrice: 280 } })).status, 200); // above the old ₦250 cap
+  assert.equal((await api.call('PUT', '/v1/landlord/tariff', { token: owner, body: { unitPrice: 301 } })).status, 400);
+  const floor = await api.call('PUT', '/v1/landlord/tariff', { token: owner, body: { unitPrice: 199 } });
+  assert.equal(floor.status, 400);
+  assert.match(floor.body.error.message, /utility cost of ₦200/);
+
+  const reset = await api.call('POST', '/v1/staff/settings/tariff/reset', { token: staffToken });
+  assert.equal(reset.body.settings.maxUnitPriceNaira, 250);
+  assert.equal(reset.body.impact.aboveMax, 1); // Ada is now at ₦280, above the default cap
+});

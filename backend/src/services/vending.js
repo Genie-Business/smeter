@@ -13,7 +13,7 @@ import { badRequest, notFound, upstream } from '../util/errors.js';
 import { koboToNaira } from '../util/http.js';
 import { notify } from './notifications.js';
 import { quote } from './pricing.js';
-import { paymentParams } from './settings.js';
+import { getTariffSettings, paymentParams } from './settings.js';
 
 const naira = (kobo) => `₦${koboToNaira(kobo).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
 
@@ -25,7 +25,7 @@ export async function quoteFor(meter, landlord, amountKobo, params) {
   return quote({
     amountKobo,
     unitPriceKobo: landlord.unit_price_kobo,
-    baseCostKobo: Math.round(config.tariff.baseUnitCostNaira * 100),
+    baseCostKobo: Math.round((await getTariffSettings()).baseUnitCostNaira * 100),
     feeBearer: landlord.fee_bearer,
     debtKobo: meter.debt_kobo,
     debtPercent: meter.debt_recovery_percent,

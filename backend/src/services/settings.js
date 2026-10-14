@@ -113,3 +113,86 @@ export async function publicPaymentOptions() {
 }
 
 export const paymentSettingsDefaults = envDefaults;
+
+// ---- Unit price limits ---------------------------------------------------------
+// MAX_UNIT_PRICE_NAIRA / BASE_UNIT_COST_NAIRA are the defaults. Owners set their
+// own price per kWh between the utility cost (floor) and the regulated cap.
+
+const tariffDefaults = () => ({
+  maxUnitPriceNaira: config.tariff.maxUnitPriceNaira,
+  baseUnitCostNaira: config.tariff.baseUnitCostNaira,
+});
+
+export const tariffSettingsSchema = z
+  .object({
+    maxUnitPriceNaira: z.coerce.number({ error: 'Enter the maximum price' }).positive('The maximum must be above ₦0').max(100_000, 'The maximum is too high'),
+    baseUnitCostNaira: z.coerce.number({ error: 'Enter the utility cost' }).positive('The utility cost must be above ₦0').max(100_000, 'The utility cost is too high'),
+  })
+  .refine((s) => s.baseUnitCostNaira < s.maxUnitPriceNaira, {
+    message: 'The utility cost must be below the maximum price, or owners can’t set any price',
+    path: ['baseUnitCostNaira'],
+  });
+
+let tariffCache = null;
+// Last loaded values, for synchronous readers (e.g. DTOs). Refreshed by
+// getTariffSettings(), which every /v1 request triggers through the cache.
+let tariffSnapshot = null;
+
+export async function getTariffSettings({ fresh = false } = {}) {
+  if (!fresh && tariffCache && tariffCache.expires > Date.now()) return tariffCache.value;
+  const row = await db().get(
+    `SELECT s.data, s.updated_at, st.name AS by_name FROM settings s
+     LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'tariff'`,
+  );
+  const parsed = tariffSettingsSchema.safeParse({ ...tariffDefaults(), ...(row ? JSON.parse(row.data) : {}) });
+  const value = {
+    ...(parsed.success ? parsed.data : tariffDefaults()),
+    updatedAt: row?.updated_at ?? null,
+    updatedBy: row?.by_name ?? null,
+  };
+  tariffCache = { value, expires: Date.now() + CACHE_MS };
+  tariffSnapshot = value;
+  return value;
+}
+
+/** Synchronous best-known values (env defaults until first load). */
+export function tariffNow() {
+  return tariffSnapshot ?? tariffDefaults();
+}
+
+export async function saveTariffSettings(input, staffId) {
+  const parsed = tariffSettingsSchema.safeParse(input);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw badRequest(issue.message, { [issue.path.join('.') || 'settings']: issue.message });
+  }
+  await db().run(
+    `INSERT INTO settings (key, data, updated_by, updated_at) VALUES ('tariff', ?, ?, ?)
+     ON CONFLICT (key) DO UPDATE SET data = excluded.data, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    JSON.stringify(parsed.data), staffId, now(),
+  );
+  tariffCache = null;
+  return getTariffSettings({ fresh: true });
+}
+
+export async function resetTariffSettings() {
+  await db().run("DELETE FROM settings WHERE key = 'tariff'");
+  tariffCache = null;
+  return getTariffSettings({ fresh: true });
+}
+
+/** Owners whose current price falls outside the limits (shown as a warning in the admin). */
+export async function tariffImpact(s) {
+  const max = Math.round(s.maxUnitPriceNaira * 100);
+  const base = Math.round(s.baseUnitCostNaira * 100);
+  const row = await db().get(
+    `SELECT COUNT(*) FILTER (WHERE unit_price_kobo > ?) AS above_max,
+            COUNT(*) FILTER (WHERE unit_price_kobo > 0 AND unit_price_kobo < ?) AS below_cost,
+            COUNT(*) FILTER (WHERE unit_price_kobo > 0) AS priced
+     FROM landlords`,
+    max, base,
+  );
+  return { aboveMax: row.above_max, belowCost: row.below_cost, priced: row.priced };
+}
+
+export const tariffSettingsDefaults = tariffDefaults;

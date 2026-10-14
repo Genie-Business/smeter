@@ -1,4 +1,4 @@
-import { config } from '../config.js';
+import { tariffNow } from '../services/settings.js';
 import { koboToNaira } from '../util/http.js';
 import { maskPhone } from '../util/phone.js';
 
@@ -23,8 +23,8 @@ export function landlordDto(l) {
     unitPrice: koboToNaira(l.unit_price_kobo),
     feeBearer: l.fee_bearer,
     tariffLimits: {
-      max: config.tariff.maxUnitPriceNaira,
-      baseCost: config.tariff.baseUnitCostNaira,
+      max: tariffNow().maxUnitPriceNaira,
+      baseCost: tariffNow().baseUnitCostNaira,
     },
   };
 }

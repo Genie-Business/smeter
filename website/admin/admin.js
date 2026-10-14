@@ -90,6 +90,7 @@ const I = {
   phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
   team: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11a3 3 0 1 0 0-6M21 20c0-2.6-1.7-4.8-4-5.6"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
   card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/>',
 };
 const icon = (name) => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${I[name]}</svg>`);
@@ -108,6 +109,7 @@ const routes = [
   [/^#\/content\/(site|app)$/, contentEditor],
   [/^#\/team$/, team],
   [/^#\/settings\/payments$/, paymentSettings],
+  [/^#\/settings\/pricing$/, tariffSettings],
 ];
 
 let leaveGuard = null; // returns true if navigation should be blocked
@@ -180,6 +182,7 @@ function shell(hash) {
           ${link('#/content/app', 'phone', 'Mobile app')}
           <div class="group">Settings</div>
           ${link('#/settings/payments', 'card', 'Payments')}
+          ${link('#/settings/pricing', 'tag', 'Pricing')}
           ${link('#/team', 'team', 'Team')}
         </nav>
         <div class="me"><b>${me.name}</b>${me.email}<br><span class="pill brand" style="margin-top:6px">${humanize(me.role)}</span><br><button type="button" id="signout">Sign out</button></div>
@@ -877,6 +880,120 @@ async function paymentSettings(main) {
     if (!confirm('Reset all payment settings to the defaults?')) return;
     try {
       apply(await api('/settings/payments/reset', { method: 'POST' }), 'Payment settings reset to defaults');
+    } catch (err) {
+      showErr(err.message);
+    }
+  });
+  paint();
+}
+
+// Unit price limits
+const TARIFF_FIELDS = [
+  ['maxUnitPriceNaira', 'Maximum price per kWh', 'The highest price an owner can charge (the regulated cap).'],
+  ['baseUnitCostNaira', 'Utility cost per kWh', 'What smeter pays the utility for each kWh. Owners can’t price below it; the difference is their margin.'],
+];
+
+async function tariffSettings(main) {
+  const r = await api('/settings/tariff');
+  const canEdit = me.role === 'owner';
+  let saved = r.settings;
+  let s = structuredClone(saved);
+  let impact = r.impact;
+  const pick = (x) => Object.fromEntries(TARIFF_FIELDS.map(([k]) => [k, Number(x[k])]));
+  const dirty = () => JSON.stringify(pick(s)) !== JSON.stringify(pick(saved));
+  leaveGuard = dirty;
+
+  render(main, html`
+    <div class="page-head"><div><h1>Pricing</h1><p>Property owners set their own price per kWh between these limits. Changes apply within a few seconds.</p></div></div>
+    ${canEdit ? '' : html`<div class="card" style="margin-bottom:14px"><p class="muted" style="margin:0">Only account owners can change pricing limits.</p></div>`}
+    <div id="tar-err"></div>
+    <div class="grid g2" style="align-items:start">
+      <div class="card">
+        <h2>Unit price limits</h2>
+        ${TARIFF_FIELDS.map(([key, label, hint]) => html`
+          <div class="field">
+            <label for="t-${key}">${label}</label>
+            <div class="affix pre"><span>₦</span><input class="input" id="t-${key}" data-key="${key}" type="number" inputmode="decimal" min="0" step="0.5" value="${s[key]}" ${canEdit ? '' : raw('disabled')}></div>
+            <div class="hint">${hint} <span class="muted">Default: ₦${num(r.defaults[key])}</span></div>
+          </div>`)}
+      </div>
+      <div class="card">
+        <h2>What owners can charge</h2>
+        <div id="tar-summary"></div>
+        <div id="tar-impact" style="margin-top:14px"></div>
+      </div>
+    </div>
+    <div class="savebar">
+      <span class="grow muted" id="tar-meta"></span>
+      ${canEdit ? html`<button class="btn" type="button" id="tar-reset">Reset to defaults</button><button class="btn primary" type="button" id="tar-save">Save changes</button>` : ''}
+    </div>`);
+
+  function paint() {
+    const ok = Number.isFinite(Number(s.maxUnitPriceNaira)) && Number.isFinite(Number(s.baseUnitCostNaira));
+    render(main.querySelector('#tar-summary'), ok
+      ? html`<dl class="kv">
+          <dt>Price range</dt><dd>${naira(s.baseUnitCostNaira)} to ${naira(s.maxUnitPriceNaira)} per kWh</dd>
+          <dt>Most an owner earns</dt><dd>${naira(s.maxUnitPriceNaira - s.baseUnitCostNaira)} per kWh</dd>
+        </dl>`
+      : '');
+    const lines = [];
+    if (impact?.belowCost) lines.push(html`<div class="err-box">${num(impact.belowCost)} owner${impact.belowCost === 1 ? ' is' : 's are'} priced below this utility cost. Their tenants can’t buy power until they raise their price.</div>`);
+    if (impact?.aboveMax) lines.push(html`<div class="err-box" style="background:var(--warn-soft);color:var(--warn)">${num(impact.aboveMax)} owner${impact.aboveMax === 1 ? ' is' : 's are'} priced above this maximum. Their current price stays until they change it.</div>`);
+    if (!lines.length && impact) {
+      lines.push(html`<p class="muted" style="margin:0">${impact.priced
+        ? `All ${num(impact.priced)} owner${impact.priced === 1 ? '' : 's'} with a price ${impact.priced === 1 ? 'is' : 'are'} within these limits.`
+        : 'No owners have set a price yet.'}</p>`);
+    }
+    render(main.querySelector('#tar-impact'), html`${lines}`);
+    render(main.querySelector('#tar-meta'), html`${saved.updatedAt ? html`Last changed ${dateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ''}` : 'Using the defaults.'}${dirty() ? html` <span class="pill warn">Unsaved changes</span>` : ''}`);
+  }
+
+  let t;
+  const preview = () => {
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      try {
+        impact = (await api('/settings/tariff/preview', { method: 'POST', body: pick(s) })).impact;
+        showErr(null);
+      } catch (err) {
+        impact = null;
+        showErr(err.message);
+      }
+      paint();
+    }, 350);
+  };
+  main.querySelectorAll('input[data-key]').forEach((inp) => (inp.oninput = () => {
+    s[inp.dataset.key] = inp.value === '' ? NaN : Number(inp.value);
+    paint();
+    preview();
+  }));
+
+  const showErr = (err) => render(main.querySelector('#tar-err'), err ? html`<div class="err-box">${err}</div>` : '');
+  const apply = (res, msg) => {
+    saved = res.settings;
+    s = structuredClone(saved);
+    impact = res.impact;
+    main.querySelectorAll('input[data-key]').forEach((inp) => (inp.value = s[inp.dataset.key]));
+    showErr(null);
+    paint();
+    toast(msg);
+  };
+  main.querySelector('#tar-save')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget;
+    if (impact?.belowCost && !confirm(`${impact.belowCost} owner(s) will be priced below the utility cost, so their tenants can’t buy power until they raise their price. Save anyway?`)) return;
+    b.disabled = true;
+    try {
+      apply(await api('/settings/tariff', { method: 'PUT', body: pick(s) }), 'Pricing limits saved');
+    } catch (err) {
+      showErr(err.message);
+    } finally {
+      b.disabled = false;
+    }
+  });
+  main.querySelector('#tar-reset')?.addEventListener('click', async () => {
+    if (!confirm('Reset the pricing limits to the defaults?')) return;
+    try {
+      apply(await api('/settings/tariff/reset', { method: 'POST' }), 'Pricing limits reset to defaults');
     } catch (err) {
       showErr(err.message);
     }

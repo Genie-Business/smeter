@@ -9,6 +9,7 @@ import { geni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
 import { codeEmail, inviteEmail, maskEmail, sendEmail } from '../providers/email.js';
 import { listNotifications, markAllRead, notify, unreadCount } from '../services/notifications.js';
+import { getTariffSettings } from '../services/settings.js';
 import { liveReading } from '../services/usage.js';
 import { createPurchase, getPurchase, landlordPurchaseDto, settlePayment, vend } from '../services/vending.js';
 import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
@@ -25,7 +26,8 @@ const tariffIdFor = (landlord) => landlord.tariff_id ?? `SML${String(landlord.id
 /** Make sure the landlord's tariff exists on the head-end with their price. */
 async function syncTariff(landlord) {
   const tariffId = tariffIdFor(landlord);
-  const price = koboToNaira(landlord.unit_price_kobo || Math.round(config.tariff.baseUnitCostNaira * 100));
+  const { baseUnitCostNaira } = await getTariffSettings();
+  const price = koboToNaira(landlord.unit_price_kobo || Math.round(baseUnitCostNaira * 100));
   await geni().upsertTariff({ tariffId, tariffName: `${landlord.full_name} (smeter)`.slice(0, 60), price, tax: 0 });
   if (!landlord.tariff_id) await db().run('UPDATE landlords SET tariff_id = ? WHERE id = ?', tariffId, landlord.id);
   return tariffId;
@@ -101,11 +103,12 @@ landlordRoutes.get('/dashboard', async (req, res) => {
 
 landlordRoutes.put('/tariff', async (req, res) => {
   const { unitPrice } = parse(z.object({ unitPrice: z.coerce.number().positive('Enter a price per kWh') }), req.body);
-  if (unitPrice > config.tariff.maxUnitPriceNaira) {
-    throw badRequest(`The regulated maximum is ₦${config.tariff.maxUnitPriceNaira} per kWh`);
+  const limits = await getTariffSettings();
+  if (unitPrice > limits.maxUnitPriceNaira) {
+    throw badRequest(`The regulated maximum is ₦${limits.maxUnitPriceNaira} per kWh`);
   }
-  if (unitPrice < config.tariff.baseUnitCostNaira) {
-    throw badRequest(`Price can't be below the utility cost of ₦${config.tariff.baseUnitCostNaira} per kWh`);
+  if (unitPrice < limits.baseUnitCostNaira) {
+    throw badRequest(`Price can't be below the utility cost of ₦${limits.baseUnitCostNaira} per kWh`);
   }
   const previous = req.landlord.unit_price_kobo;
   await db().run('UPDATE landlords SET unit_price_kobo = ? WHERE id = ?', nairaToKobo(unitPrice), req.landlord.id);

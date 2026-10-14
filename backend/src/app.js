@@ -8,6 +8,7 @@ import { publicRoutes } from './routes/public.js';
 import { serveUpload, staffRoutes } from './routes/staff.js';
 import { supportRoutes } from './routes/support.js';
 import { tenantRoutes } from './routes/tenant.js';
+import { getTariffSettings } from './services/settings.js';
 import { sweepOnce } from './services/sweeper.js';
 import { AppError } from './util/errors.js';
 
@@ -54,6 +55,16 @@ export function createApp() {
     }
     await sweepOnce();
     res.json({ ok: true });
+  });
+
+  // Keep the admin-editable unit price limits fresh for synchronous readers (DTOs).
+  app.use('/v1', async (_req, _res, next) => {
+    try {
+      await getTariffSettings();
+      next();
+    } catch (err) {
+      next(err);
+    }
   });
 
   app.use('/v1/auth', authRoutes);
