@@ -7,7 +7,7 @@
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 import { db, now, tx } from '../db.js';
-import { geni } from '../geni/index.js';
+import { geni, geniMode, refreshGeni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
 import { badRequest, notFound, upstream } from '../util/errors.js';
 import { koboToNaira } from '../util/http.js';
@@ -34,6 +34,11 @@ export async function quoteFor(meter, landlord, amountKobo, params) {
 
 export async function createPurchase({ meter, landlord, amountKobo, initiatedBy, email, channel }) {
   if (meter.status !== 'active' && initiatedBy === 'tenant') throw badRequest('This meter is not active yet');
+  // Never take real money for tokens from the simulated head-end.
+  await refreshGeni();
+  if (config.isProduction && geniMode() !== 'live') {
+    throw upstream('Buying power is unavailable right now. Please try again later.');
+  }
   const params = await paymentParams();
   if (channel && !params.channels.includes(channel)) {
     throw badRequest('That payment method isn’t available right now. Choose another one.');

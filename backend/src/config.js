@@ -145,9 +145,6 @@ export function assertConfig() {
   if (config.payments.provider === 'paystack' && !paystackHasKey) {
     problems.push('PAYMENTS_PROVIDER=paystack requires PAYSTACK_SECRET_KEY');
   }
-  if (config.isProduction && config.geni.mode === 'mock') {
-    problems.push('Refusing to run production against the mock meter head-end (set GENI_* credentials)');
-  }
   if (config.isProduction && config.payments.provider === 'mock') {
     problems.push('Refusing to run production with mock payments (set PAYSTACK_SECRET_KEY)');
   }

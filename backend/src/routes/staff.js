@@ -12,7 +12,9 @@ import { contentHistory, getContent, resetContent, restoreContent, saveContent }
 import {
   PAYMENT_CHANNELS, getPaymentSettings, getTariffSettings, paymentSettingsDefaults, resetPaymentSettings,
   resetTariffSettings, savePaymentSettings, saveTariffSettings, tariffImpact, tariffSettingsDefaults, tariffSettingsSchema,
+  geniSettingsDefaults, getGeniSettings, mergeGeniInput, publicGeniSettings, resetGeniSettings, saveGeniSettings,
 } from '../services/settings.js';
+import { GeniClient } from '../geni/client.js';
 import { liveReading } from '../services/usage.js';
 import { landlordPurchaseDto } from '../services/vending.js';
 import { badRequest, conflict, notFound, unauthorized } from '../util/errors.js';
@@ -367,6 +369,45 @@ staffRoutes.put('/settings/tariff', requireStaff({ role: 'owner' }), async (req,
 
 staffRoutes.post('/settings/tariff/reset', requireStaff({ role: 'owner' }), async (_req, res) => {
   res.json(await tariffSettingsResponse(await resetTariffSettings()));
+});
+
+// ---- Meter head-end connection ---------------------------------------------------
+// Owners only: these credentials can mint real tokens.
+
+const geniResponse = (s) => ({ settings: publicGeniSettings(s), defaults: geniSettingsDefaults() });
+
+staffRoutes.get('/settings/geni', requireStaff({ role: 'owner' }), async (_req, res) => {
+  res.json(geniResponse(await getGeniSettings({ fresh: true })));
+});
+
+staffRoutes.put('/settings/geni', requireStaff({ role: 'owner' }), async (req, res) => {
+  res.json(geniResponse(await saveGeniSettings(req.body, req.staff.id)));
+});
+
+staffRoutes.post('/settings/geni/reset', requireStaff({ role: 'owner' }), async (_req, res) => {
+  res.json(geniResponse(await resetGeniSettings()));
+});
+
+// Sign in with the entered details (unsaved), optionally looking up a meter. Read-only.
+staffRoutes.post('/settings/geni/test', requireStaff({ role: 'owner' }), async (req, res) => {
+  const { meterId, ...input } = req.body ?? {};
+  const s = await mergeGeniInput({ ...input, mode: 'live' });
+  const client = new GeniClient({ ...config.geni, ...s, mode: 'live' });
+  try {
+    await client.login();
+  } catch (err) {
+    return res.json({ ok: false, message: `Sign-in failed: ${err.message}` });
+  }
+  let meter;
+  if (meterId) {
+    try {
+      const m = await client.getMeter(String(meterId).trim());
+      meter = m ? { found: true, meterId: m.meterId, threePhase: m.isThreePhase } : { found: false };
+    } catch (err) {
+      meter = { found: false, error: err.message };
+    }
+  }
+  res.json({ ok: true, message: 'Signed in to the head-end.', meter });
 });
 
 // Image upload for content fields. Raw body; type sniffed from magic bytes.

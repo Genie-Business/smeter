@@ -76,7 +76,10 @@ export class GeniClient {
     try {
       json = text ? JSON.parse(text) : {};
     } catch {
-      throw new GeniError(`Meter head-end returned non-JSON (${response.status})`, { status: response.status, path });
+      throw new GeniError(
+        `No head-end API answered at this address (HTTP ${response.status}). Check the port: the API is usually :9200, the website :9201.`,
+        { status: response.status, path },
+      );
     }
     if (!response.ok) {
       throw new GeniError(json?.reason || `Meter head-end error ${response.status}`, { status: response.status, path });

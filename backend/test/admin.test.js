@@ -266,3 +266,40 @@ test('unit price limits: owners edit, limits reach owners, impact is reported', 
   assert.equal(reset.body.settings.maxUnitPriceNaira, 250);
   assert.equal(reset.body.impact.aboveMax, 1); // Ada is now at ₦280, above the default cap
 });
+
+test('head-end connection: owners only, secrets encrypted and never returned', async () => {
+  resetRateLimits();
+  assert.equal((await api.call('GET', '/v1/staff/settings/geni', { token: editorToken })).status, 403);
+  const view = await api.call('GET', '/v1/staff/settings/geni', { token: staffToken });
+  assert.equal(view.status, 200, view.text);
+  assert.equal(view.body.settings.mode, 'mock');
+  assert.equal('password' in view.body.settings, false);
+
+  // Real head-end needs a username and password.
+  const noPass = await api.call('PUT', '/v1/staff/settings/geni', { token: staffToken, body: { mode: 'live', baseUrl: 'http://8.208.24.83:9200', company: 'Geni', userId: 'admin' } });
+  assert.equal(noPass.status, 400);
+
+  // Save with secrets while staying on the simulated head-end.
+  const saved = await api.call('PUT', '/v1/staff/settings/geni', {
+    token: staffToken,
+    body: { mode: 'mock', baseUrl: 'http://8.208.24.83:9200/', company: 'Geni', userId: 'admin', password: 'p4ss-word', authorizationPassword: 'auth-9' },
+  });
+  assert.equal(saved.status, 200, saved.text);
+  assert.equal(saved.body.settings.baseUrl, 'http://8.208.24.83:9200');
+  assert.equal(saved.body.settings.passwordSet, true);
+  assert.equal(saved.body.settings.authorizationPasswordSet, true);
+  assert.ok(!saved.text.includes('p4ss-word') && !saved.text.includes('auth-9'), 'secrets never returned');
+  const row = await db().get("SELECT data FROM settings WHERE key = 'geni'");
+  assert.ok(!row.data.includes('p4ss-word'), 'password stored encrypted');
+
+  // Blank secrets keep the stored ones; the server reads them back decrypted.
+  const again = await api.call('PUT', '/v1/staff/settings/geni', { token: staffToken, body: { mode: 'mock', baseUrl: 'http://8.208.24.83:9200', company: 'Geni', userId: 'admin2' } });
+  assert.equal(again.body.settings.passwordSet, true);
+  const { getGeniSettings } = await import('../src/services/settings.js');
+  const effective = await getGeniSettings({ fresh: true });
+  assert.equal(effective.password, 'p4ss-word');
+  assert.equal(effective.userId, 'admin2');
+
+  const reset = await api.call('POST', '/v1/staff/settings/geni/reset', { token: staffToken });
+  assert.equal(reset.body.settings.passwordSet, false);
+});

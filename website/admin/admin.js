@@ -110,6 +110,7 @@ const routes = [
   [/^#\/team$/, team],
   [/^#\/settings\/payments$/, paymentSettings],
   [/^#\/settings\/pricing$/, tariffSettings],
+  [/^#\/settings\/head-end$/, geniSettings],
 ];
 
 let leaveGuard = null; // returns true if navigation should be blocked
@@ -183,6 +184,7 @@ function shell(hash) {
           <div class="group">Settings</div>
           ${link('#/settings/payments', 'card', 'Payments')}
           ${link('#/settings/pricing', 'tag', 'Pricing')}
+          ${me.role === 'owner' ? link('#/settings/head-end', 'meters', 'Meter head-end') : ''}
           ${link('#/team', 'team', 'Team')}
         </nav>
         <div class="me"><b>${me.name}</b>${me.email}<br><span class="pill brand" style="margin-top:6px">${humanize(me.role)}</span><br><button type="button" id="signout">Sign out</button></div>
@@ -999,6 +1001,115 @@ async function tariffSettings(main) {
     }
   });
   paint();
+}
+
+// Meter head-end connection (owners only)
+async function geniSettings(main) {
+  if (me.role !== 'owner') {
+    render(main, html`<div class="page-head"><div><h1>Meter head-end</h1></div></div><div class="card"><p class="muted" style="margin:0">Only account owners can view or change the head-end connection.</p></div>`);
+    return;
+  }
+  const r = await api('/settings/geni');
+  let saved = r.settings;
+  render(main, html`
+    <div class="page-head"><div><h1>Meter head-end</h1><p>The Geni / Calin system that registers meters and generates tokens. Changes apply within a few seconds.</p></div></div>
+    <div id="geni-err"></div>
+    <div class="grid g2" style="align-items:start">
+      <form class="card" id="geni" novalidate autocomplete="off">
+        <h2>Connection</h2>
+        <div class="field">
+          <label for="g-mode">Head-end in use</label>
+          <select class="input" id="g-mode">
+            <option value="live">Real head-end (real meters and tokens)</option>
+            <option value="mock">Simulated (for testing; no real tokens)</option>
+          </select>
+        </div>
+        <div class="field"><label for="g-url">API address</label><input class="input" id="g-url" placeholder="http://8.208.24.83:9200"><div class="hint">The API port, not the website (usually :9200).</div></div>
+        <div class="field"><label for="g-company">Company</label><input class="input" id="g-company"></div>
+        <div class="field"><label for="g-user">Username</label><input class="input" id="g-user" autocomplete="off"></div>
+        <div class="field"><label for="g-pass">Password</label><input class="input" id="g-pass" type="password" autocomplete="new-password"><div class="hint" id="g-pass-hint"></div></div>
+        <div class="field"><label for="g-auth">Authorization password</label><input class="input" id="g-auth" type="password" autocomplete="new-password"><div class="hint" id="g-auth-hint"></div></div>
+      </form>
+      <div class="card">
+        <h2>Test the connection</h2>
+        <p class="muted" style="margin-top:0">Signs in with the details on the left (saved or not) and can look up a meter. Nothing is changed on the head-end.</p>
+        <div class="field"><label for="g-meter">Meter number (optional)</label><input class="input" id="g-meter" inputmode="numeric" placeholder="e.g. 47300622942"></div>
+        <button class="btn" type="button" id="g-test">Test connection</button>
+        <div id="g-result" style="margin-top:14px"></div>
+      </div>
+    </div>
+    <div class="savebar">
+      <span class="grow muted" id="geni-meta"></span>
+      <button class="btn" type="button" id="geni-reset">Reset to defaults</button><button class="btn primary" type="button" id="geni-save">Save changes</button>
+    </div>`);
+  const $ = (id) => main.querySelector(id);
+  const fill = () => {
+    $('#g-mode').value = saved.mode;
+    $('#g-url').value = saved.baseUrl;
+    $('#g-company').value = saved.company;
+    $('#g-user').value = saved.userId;
+    $('#g-pass').value = '';
+    $('#g-auth').value = '';
+    $('#g-pass-hint').textContent = saved.passwordSet ? 'Saved. Leave blank to keep it, or type a new one.' : 'Not set.';
+    $('#g-auth-hint').textContent = saved.authorizationPasswordSet
+      ? 'Saved. Leave blank to keep it. Needed to generate tokens.'
+      : 'Not set. Needed to generate tokens.';
+    render($('#geni-meta'), html`${saved.updatedAt ? `Last changed ${dateTime(saved.updatedAt)}${saved.updatedBy ? ` by ${saved.updatedBy}` : ''}` : 'Using the server defaults.'} · <span class="pill ${saved.mode === 'live' ? 'ok' : 'warn'}">${saved.mode === 'live' ? 'Real head-end' : 'Simulated'}</span>`);
+  };
+  const body = () => {
+    const b = { mode: $('#g-mode').value, baseUrl: $('#g-url').value, company: $('#g-company').value, userId: $('#g-user').value };
+    if ($('#g-pass').value) b.password = $('#g-pass').value;
+    if ($('#g-auth').value) b.authorizationPassword = $('#g-auth').value;
+    return b;
+  };
+  const showErr = (err) => render($('#geni-err'), err ? html`<div class="err-box">${err}</div>` : '');
+  leaveGuard = () => {
+    const b = body();
+    return b.mode !== saved.mode || b.baseUrl.replace(/\/+$/, '') !== saved.baseUrl || b.company !== saved.company || b.userId !== saved.userId || 'password' in b || 'authorizationPassword' in b;
+  };
+  $('#g-test').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    render($('#g-result'), html`<span class="muted">Testing...</span>`);
+    try {
+      const t = await api('/settings/geni/test', { method: 'POST', body: { ...body(), meterId: $('#g-meter').value.trim() || undefined } });
+      const m = t.meter;
+      render($('#g-result'), html`<div class="${t.ok ? '' : 'err-box'}">${t.ok ? html`<span class="pill ok">Connected</span> ` : ''}${t.message}</div>
+        ${m ? html`<p style="margin:10px 0 0">${m.found ? `Meter ${m.meterId} found (${m.threePhase ? 'three-phase' : 'single-phase'}).` : m.error ? `Meter lookup failed: ${m.error}` : 'That meter isn’t on the head-end.'}</p>` : ''}`);
+    } catch (err) {
+      render($('#g-result'), html`<div class="err-box">${err.message}</div>`);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  $('#geni-save').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const b = body();
+    if (b.mode === 'live' && saved.mode !== 'live' && !confirm('Switch to the real head-end? New meters will be registered on it and purchases will generate real tokens.')) return;
+    btn.disabled = true;
+    try {
+      saved = (await api('/settings/geni', { method: 'PUT', body: b })).settings;
+      fill();
+      showErr(null);
+      toast('Head-end settings saved');
+    } catch (err) {
+      showErr(err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+  $('#geni-reset').onclick = async () => {
+    if (!confirm('Reset the head-end connection to the server defaults?')) return;
+    try {
+      saved = (await api('/settings/geni/reset', { method: 'POST' })).settings;
+      fill();
+      showErr(null);
+      toast('Head-end settings reset to defaults');
+    } catch (err) {
+      showErr(err.message);
+    }
+  };
+  fill();
 }
 
 // Helpers

@@ -3,6 +3,7 @@
 // PAYMENT_AUDIT_AFTER_MINUTES) are the defaults; saved values override them.
 // Read through a short per-instance cache so every quote doesn't hit the
 // database, while edits reach all serverless instances within seconds.
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { db, now } from '../db.js';
@@ -196,3 +197,108 @@ export async function tariffImpact(s) {
 }
 
 export const tariffSettingsDefaults = tariffDefaults;
+
+// ---- Meter head-end (Geni / Calin) connection --------------------------------------
+// GENI_* env vars are the defaults. Passwords are stored encrypted (AES-256-GCM,
+// key derived from JWT_SECRET) and are never sent back to the dashboard.
+
+const GENI_SECRET_FIELDS = ['password', 'authorizationPassword'];
+
+function secretKey() {
+  return createHash('sha256').update(`${config.jwtSecret}:settings-secrets`).digest();
+}
+function seal(plain) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', secretKey(), iv);
+  const data = Buffer.concat([cipher.update(String(plain), 'utf8'), cipher.final()]);
+  return `v1:${iv.toString('base64')}:${cipher.getAuthTag().toString('base64')}:${data.toString('base64')}`;
+}
+function unseal(sealed) {
+  try {
+    const [v, iv, tag, data] = String(sealed).split(':');
+    if (v !== 'v1') return '';
+    const d = createDecipheriv('aes-256-gcm', secretKey(), Buffer.from(iv, 'base64'));
+    d.setAuthTag(Buffer.from(tag, 'base64'));
+    return Buffer.concat([d.update(Buffer.from(data, 'base64')), d.final()]).toString('utf8');
+  } catch {
+    return ''; // e.g. JWT_SECRET changed: treat as not set
+  }
+}
+
+const geniEnvDefaults = () => ({
+  mode: config.geni.mode,
+  baseUrl: config.geni.baseUrl,
+  company: config.geni.company,
+  userId: config.geni.userId,
+  password: config.geni.password,
+  authorizationPassword: config.geni.authorizationPassword,
+});
+
+export const geniSettingsSchema = z.object({
+  mode: z.enum(['live', 'mock']),
+  baseUrl: z.string().trim().url('Enter the head-end address, e.g. http://8.208.24.83:9200').max(200).transform((u) => u.replace(/\/+$/, '')),
+  company: z.string().trim().min(1, 'Enter the company').max(80),
+  userId: z.string().trim().max(80),
+  password: z.string().max(200).optional(),
+  authorizationPassword: z.string().max(200).optional(),
+});
+
+let geniCache = null;
+
+/** Effective head-end settings, secrets included (server-side use only). */
+export async function getGeniSettings({ fresh = false } = {}) {
+  if (!fresh && geniCache && geniCache.expires > Date.now()) return geniCache.value;
+  const row = await db().get(
+    `SELECT s.data, s.updated_at, st.name AS by_name FROM settings s
+     LEFT JOIN staff st ON st.id = s.updated_by WHERE s.key = 'geni'`,
+  );
+  const saved = row ? JSON.parse(row.data) : {};
+  for (const f of GENI_SECRET_FIELDS) if (saved[f] !== undefined) saved[f] = unseal(saved[f]);
+  const value = { ...geniEnvDefaults(), ...saved, updatedAt: row?.updated_at ?? null, updatedBy: row?.by_name ?? null };
+  if (value.mode === 'live' && !(value.userId && value.password)) value.mode = 'mock';
+  geniCache = { value, expires: Date.now() + CACHE_MS };
+  return value;
+}
+
+/** Dashboard view: secrets replaced by whether they are set. */
+export function publicGeniSettings(s) {
+  const { password, authorizationPassword, ...rest } = s;
+  return { ...rest, passwordSet: Boolean(password), authorizationPasswordSet: Boolean(authorizationPassword) };
+}
+
+/** Merge a dashboard edit over the current values; blank secrets keep the stored ones. */
+export async function mergeGeniInput(input) {
+  const parsed = geniSettingsSchema.safeParse(input ?? {});
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw badRequest(issue.message, { [issue.path.join('.') || 'settings']: issue.message });
+  }
+  const current = await getGeniSettings({ fresh: true });
+  const next = { ...parsed.data };
+  for (const f of GENI_SECRET_FIELDS) if (!next[f]) next[f] = current[f];
+  if (next.mode === 'live' && !(next.userId && next.password)) {
+    throw badRequest('Enter the head-end username and password to use the real head-end');
+  }
+  return next;
+}
+
+export async function saveGeniSettings(input, staffId) {
+  const next = await mergeGeniInput(input);
+  const stored = { ...next };
+  for (const f of GENI_SECRET_FIELDS) stored[f] = next[f] ? seal(next[f]) : '';
+  await db().run(
+    `INSERT INTO settings (key, data, updated_by, updated_at) VALUES ('geni', ?, ?, ?)
+     ON CONFLICT (key) DO UPDATE SET data = excluded.data, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+    JSON.stringify(stored), staffId, now(),
+  );
+  geniCache = null;
+  return getGeniSettings({ fresh: true });
+}
+
+export async function resetGeniSettings() {
+  await db().run("DELETE FROM settings WHERE key = 'geni'");
+  geniCache = null;
+  return getGeniSettings({ fresh: true });
+}
+
+export const geniSettingsDefaults = () => publicGeniSettings(geniEnvDefaults());

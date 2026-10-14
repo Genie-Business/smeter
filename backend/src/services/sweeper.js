@@ -3,10 +3,12 @@
 //    with the gateway (the "audit alert" path);
 //  - paid purchases whose token generation failed are retried.
 import { db, now } from '../db.js';
+import { refreshGeni } from '../geni/index.js';
 import { paymentParams } from './settings.js';
 import { settlePayment, vend } from './vending.js';
 
 export async function sweepOnce() {
+  await refreshGeni(); // runs outside API requests (timer / cron)
   const { auditAfterMinutes } = await paymentParams();
   const auditBefore = new Date(Date.now() - auditAfterMinutes * 60 * 1000).toISOString();
   const abandonBefore = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();

@@ -10,7 +10,7 @@ await bootstrapStaff();
 
 const server = createApp().listen(config.port, () => {
   console.log(
-    `smeter API on :${config.port} (env=${config.appEnv}, db=${database.kind}, geni=${config.geni.mode}, payments=${config.payments.provider}, email=${config.email.provider})`,
+    `smeter API on :${config.port} (env=${config.appEnv}, db=${database.kind}, payments=${config.payments.provider}, email=${config.email.provider})`,
   );
 });
 const stopSweeper = startSweeper();

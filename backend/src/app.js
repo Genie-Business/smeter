@@ -8,6 +8,7 @@ import { publicRoutes } from './routes/public.js';
 import { serveUpload, staffRoutes } from './routes/staff.js';
 import { supportRoutes } from './routes/support.js';
 import { tenantRoutes } from './routes/tenant.js';
+import { geniMode, refreshGeni } from './geni/index.js';
 import { getTariffSettings } from './services/settings.js';
 import { sweepOnce } from './services/sweeper.js';
 import { AppError } from './util/errors.js';
@@ -44,7 +45,8 @@ export function createApp() {
 
   app.get('/health', async (_req, res) => {
     await db().get('SELECT 1');
-    res.json({ ok: true, geni: config.geni.mode, payments: config.payments.provider, email: config.email.provider });
+    await refreshGeni();
+    res.json({ ok: true, geni: geniMode(), payments: config.payments.provider, email: config.email.provider });
   });
 
   // Payment reconciliation for serverless hosts, called by Vercel Cron with
@@ -57,10 +59,11 @@ export function createApp() {
     res.json({ ok: true });
   });
 
-  // Keep the admin-editable unit price limits fresh for synchronous readers (DTOs).
+  // Keep admin-editable settings fresh for synchronous readers (DTOs, the
+  // head-end client). Both are cached, so this rarely touches the database.
   app.use('/v1', async (_req, _res, next) => {
     try {
-      await getTariffSettings();
+      await Promise.all([getTariffSettings(), refreshGeni()]);
       next();
     } catch (err) {
       next(err);
