@@ -326,3 +326,18 @@ test('manual-token mode: no OTA push, usage from purchases, no remote switching'
   const n = await api.call('GET', '/v1/tenant/notifications', { token });
   assert.equal(n.body.data[0].title, 'Tokens now load automatically');
 });
+
+test('checkout return page handles the reference Paystack appends a second time', async () => {
+  resetRateLimits();
+  const p = await api.call('POST', '/v1/tenant/purchases', { token: tenantToken, body: { amount: 1000 } });
+  assert.equal(p.status, 201, p.text);
+  const { payments } = await import('../src/providers/payments.js');
+  await payments().complete(p.body.reference, true);
+  const ref = encodeURIComponent(p.body.reference);
+  // Exactly what Paystack redirects to: our ?reference= plus its own trxref & reference.
+  const r = await api.call('GET', `/pay/return?reference=${ref}&trxref=${ref}&reference=${ref}`);
+  assert.equal(r.status, 200);
+  assert.match(r.text, /Payment received/);
+  const s = await api.call('GET', `/v1/tenant/purchases/${p.body.reference}`, { token: tenantToken });
+  assert.equal(s.body.purchase.status, 'vended');
+});

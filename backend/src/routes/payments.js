@@ -64,7 +64,10 @@ const appLink = (reference) => `${config.appScheme}://payment?reference=${encode
 
 // Gateway redirect target: settle (in case the webhook is late) and bounce to the app.
 payPages.get('/return', async (req, res) => {
-  const reference = String(req.query.reference ?? req.query.trxref ?? '');
+  // Paystack appends ?reference=&trxref= to our callback URL, which already
+  // carries ?reference=, so the parameter can arrive as an array.
+  const first = (v) => (Array.isArray(v) ? v[0] : v);
+  const reference = String(first(req.query.reference) ?? first(req.query.trxref) ?? '');
   let status = 'pending';
   try {
     status = (await settlePayment(reference, { source: 'callback' })).status;
