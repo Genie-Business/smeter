@@ -7,13 +7,13 @@ import { consumeOtp, issueOtp, otpEcho } from '../auth/otp.js';
 import { asUpstream } from '../geni/client.js';
 import { geni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
-import { sendSms } from '../providers/sms.js';
+import { codeEmail, inviteEmail, maskEmail, sendEmail } from '../providers/email.js';
 import { listNotifications, markAllRead, notify, unreadCount } from '../services/notifications.js';
 import { liveReading } from '../services/usage.js';
 import { createPurchase, getPurchase, landlordPurchaseDto, settlePayment, vend } from '../services/vending.js';
 import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
 import { koboToNaira, nairaToKobo, pageParams, parse } from '../util/http.js';
-import { maskPhone, normalizePhone } from '../util/phone.js';
+import { normalizePhone } from '../util/phone.js';
 import { landlordDto, meterDto } from './dto.js';
 
 export const landlordRoutes = Router();
@@ -183,8 +183,11 @@ landlordRoutes.post('/bank/request', async (req, res) => {
     subject: String(req.landlord.id),
     payload: { ...body, accountName },
   });
-  await sendSms(req.landlord.phone, `Your smeter code to change your payout account is ${code}. Don't share it with anyone.`);
-  res.json({ accountName, sentTo: maskPhone(req.landlord.phone), ...otpEcho(code) });
+  await sendEmail(codeEmail({
+    to: req.landlord.email, purpose: 'payout account', code,
+    detail: `Use it to confirm ${body.bankName} ••••${body.accountNumber.slice(-4)} as your payout account.`,
+  }));
+  res.json({ accountName, sentTo: maskEmail(req.landlord.email), channel: 'email', ...otpEcho(code) });
 });
 
 // Step 2: confirm the OTP, register the settlement account, save.
@@ -226,6 +229,8 @@ const meterBody = z.object({
   address: z.string().trim().min(3, 'Enter the property address').max(240),
   apartment: z.string().trim().max(40).optional().default(''),
   tenantPhone: z.string(),
+  // Login codes and the invite go to this address.
+  tenantEmail: z.string().trim().toLowerCase().email("Enter the tenant's email address"),
   tenantFirstName: z.string().trim().max(60).optional(),
   tenantLastName: z.string().trim().max(60).optional(),
   debtAmount: z.coerce.number().min(0).max(10_000_000).optional().default(0),
@@ -266,14 +271,14 @@ landlordRoutes.post('/meters', async (req, res) => {
   const values = [
     req.landlord.id, body.address, body.apartment, body.tenantFirstName ?? null, body.tenantLastName ?? null,
     tenantPhone, info.isThreePhase ? 1 : 0, customerId, nairaToKobo(body.debtAmount), body.debtRecoveryPercent,
-    body.deliveryMode,
+    body.deliveryMode, body.tenantEmail,
   ];
   if (existing) {
     // Only re-claim a meter that is still removed (another owner may have raced us).
     const r = await db().run(
       `UPDATE meters SET landlord_id = ?, address = ?, apartment = ?, tenant_first_name = ?, tenant_last_name = ?,
          tenant_phone = ?, is_three_phase = ?, customer_id = ?, debt_kobo = ?, debt_recovery_percent = ?,
-         delivery_mode = ?, tenant_email = NULL, status = 'invited', accepted_at = NULL, relay_state = 'connected'
+         delivery_mode = ?, tenant_email = ?, status = 'invited', accepted_at = NULL, relay_state = 'connected'
        WHERE meter_id = ? AND status = 'removed'`,
       ...values, body.meterId,
     );
@@ -282,8 +287,8 @@ landlordRoutes.post('/meters', async (req, res) => {
     try {
       await db().run(
         `INSERT INTO meters (landlord_id, address, apartment, tenant_first_name, tenant_last_name, tenant_phone,
-           is_three_phase, customer_id, debt_kobo, debt_recovery_percent, delivery_mode, meter_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           is_three_phase, customer_id, debt_kobo, debt_recovery_percent, delivery_mode, tenant_email, meter_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ...values, body.meterId,
       );
     } catch (err) {
@@ -291,10 +296,7 @@ landlordRoutes.post('/meters', async (req, res) => {
       throw err;
     }
   }
-  await sendSms(
-    tenantPhone,
-    `${req.landlord.full_name} added your meter ${body.meterId} to smeter. Get the smeter app and sign in with your meter number to buy power and track usage.`,
-  );
+  await sendEmail(inviteEmail({ to: body.tenantEmail, ownerName: req.landlord.full_name, meterId: body.meterId }));
   const meter = await db().get('SELECT * FROM meters WHERE meter_id = ?', body.meterId);
   res.status(201).json({ meter: meterDto(meter) });
 });
@@ -323,19 +325,21 @@ landlordRoutes.patch('/meters/:meterId', async (req, res) => {
       debtAmount: z.coerce.number().min(0).max(10_000_000).optional(),
       debtRecoveryPercent: z.coerce.number().min(0).max(100).optional(),
       deliveryMode: z.enum(['ota', 'manual']).optional(),
+      tenantEmail: z.string().trim().toLowerCase().email("Enter the tenant's email address").optional(),
     }),
     req.body,
   );
   await db().run(
     `UPDATE meters SET address = COALESCE(?, address), apartment = COALESCE(?, apartment),
        debt_kobo = COALESCE(?, debt_kobo), debt_recovery_percent = COALESCE(?, debt_recovery_percent),
-       delivery_mode = COALESCE(?, delivery_mode)
+       delivery_mode = COALESCE(?, delivery_mode), tenant_email = COALESCE(?, tenant_email)
      WHERE id = ?`,
     body.address ?? null,
     body.apartment ?? null,
     body.debtAmount === undefined ? null : nairaToKobo(body.debtAmount),
     body.debtRecoveryPercent ?? null,
     body.deliveryMode ?? null,
+    body.tenantEmail ?? null,
     meter.id,
   );
   if (body.deliveryMode && body.deliveryMode !== meter.delivery_mode) {

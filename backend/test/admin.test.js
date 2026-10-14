@@ -28,7 +28,7 @@ async function seedOperationalData() {
   await api.call('PUT', '/v1/landlord/tariff', { token: t, body: { unitPrice: 230 } });
   await api.call('POST', '/v1/landlord/meters', {
     token: t,
-    body: { meterId: '47009990001', address: '3 Allen Ave, Ikeja', apartment: '4', tenantPhone: '08036660000', deliveryMode: 'manual' },
+    body: { meterId: '47009990001', address: '3 Allen Ave, Ikeja', apartment: '4', tenantPhone: '08036660000', tenantEmail: 'tenant4@example.com', deliveryMode: 'manual' },
   });
 }
 

@@ -43,7 +43,7 @@ export function createApp() {
 
   app.get('/health', async (_req, res) => {
     await db().get('SELECT 1');
-    res.json({ ok: true, geni: config.geni.mode, payments: config.payments.provider, sms: config.sms.provider });
+    res.json({ ok: true, geni: config.geni.mode, payments: config.payments.provider, email: config.email.provider });
   });
 
   // Payment reconciliation for serverless hosts, called by Vercel Cron with

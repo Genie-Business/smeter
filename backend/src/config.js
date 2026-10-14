@@ -33,7 +33,7 @@ const geniMode = env.GENI_MODE ?? (geniHasCreds ? 'live' : 'mock');
 const paystackHasKey = Boolean(env.PAYSTACK_SECRET_KEY);
 const paymentsProvider = env.PAYMENTS_PROVIDER ?? (paystackHasKey ? 'paystack' : 'mock');
 
-const smsProvider = env.SMS_PROVIDER ?? (env.TERMII_API_KEY ? 'termii' : 'log');
+const emailProvider = env.EMAIL_PROVIDER ?? (env.RESEND_API_KEY ? 'resend' : 'log');
 
 export const config = {
   nodeEnv,
@@ -112,11 +112,12 @@ export const config = {
     baseUnitCostNaira: num('BASE_UNIT_COST_NAIRA', 209.5),
   },
 
-  sms: {
-    provider: smsProvider, // 'termii' | 'log'
-    termiiApiKey: env.TERMII_API_KEY ?? '',
-    termiiSenderId: env.TERMII_SENDER_ID ?? 'smeter',
-    termiiBaseUrl: env.TERMII_BASE_URL ?? 'https://api.ng.termii.com',
+  email: {
+    provider: emailProvider, // 'resend' | 'log'
+    resendApiKey: env.RESEND_API_KEY ?? '',
+    // Must be on a domain verified in Resend (onboarding@resend.dev works for testing to your own address).
+    from: env.EMAIL_FROM || 'smeter <onboarding@resend.dev>',
+    replyTo: env.EMAIL_REPLY_TO || '',
   },
 
   otp: {
@@ -149,6 +150,12 @@ export function assertConfig() {
   }
   if (config.isProduction && config.payments.provider === 'mock') {
     problems.push('Refusing to run production with mock payments (set PAYSTACK_SECRET_KEY)');
+  }
+  if (config.email.provider === 'resend' && !config.email.resendApiKey) {
+    problems.push('EMAIL_PROVIDER=resend requires RESEND_API_KEY');
+  }
+  if (config.isProduction && config.email.provider !== 'resend') {
+    problems.push('Refusing to run production without email delivery (set RESEND_API_KEY and EMAIL_FROM)');
   }
   if (problems.length) throw new Error('Invalid configuration:\n - ' + problems.join('\n - '));
 }

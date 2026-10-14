@@ -25,7 +25,7 @@ small, role-scoped API to the app.
 ```
 Flutter app ──HTTPS──▶ smeter API ──▶ Geni head-end (meters, tariffs, STS tokens, load profiles)
                           │      └──▶ Paystack (card / transfer / USSD checkout, settlement split)
-                          │      └──▶ Termii SMS (OTP codes, tenant invites)
+                          │      └──▶ Resend email (login codes, password resets, tenant invites)
                           └── Postgres / Neon (landlords, meters, purchases, OTPs, notifications, tickets, content)
 ```
 
@@ -56,9 +56,9 @@ landlord chooses to bear it). The ledger screen shows this per meter.
 
 | Story | Where |
 |---|---|
-| SM-SEC-001 OTP password reset (5-min expiry, "Number not found") | `routes/auth.js`, Forgot password screens |
-| SM-ONB-001 Bank setup: account-name verification + SMS 2FA | `routes/landlord.js` `/bank/*`, Payout account screen |
-| SM-TNS-001 Meter binding: validated on the head-end, no double assignment, tenant accepts by signing in | `POST /v1/landlord/meters`, tenant OTP login |
+| SM-SEC-001 Password reset by emailed code (5-min expiry), found by email or phone | `routes/auth.js`, Forgot password screens |
+| SM-ONB-001 Bank setup: account-name verification + emailed 2FA code | `routes/landlord.js` `/bank/*`, Payout account screen |
+| SM-TNS-001 Meter binding: validated on the head-end, no double assignment, tenant accepts by signing in | `POST /v1/landlord/meters`, tenant login by meter number + code emailed to the address the owner entered |
 | SM-VEN-001 One-tap purchase, OTA delivery, offline fallback token | `services/vending.js` |
 | SM-MON-001 Virtual display (volts/amps/load, 5 s refresh, "last seen") | `GET /v1/tenant/live`, Live display card |
 | SM-FIN-001 Price per kWh with regulatory cap | `PUT /v1/landlord/tariff`, Set Unit Price |
@@ -114,7 +114,7 @@ The API can serve the website (and so the admin) itself with `SITE_DIR` pointing
 cd backend
 cp .env.example .env
 npm install
-npm run dev        # http://localhost:8080 — mock head-end, mock checkout, SMS printed to the console
+npm run dev        # http://localhost:8080 — mock head-end, mock checkout, emails printed to the console
 npm test           # 33 tests: pricing, curve parsing, purchase flow, manual mode, admin & content
 ```
 
@@ -127,7 +127,7 @@ throwaway in-memory one. To run the suite through the real `pg` driver, set
 With no credentials set, everything runs against mocks:
 - **Mock head-end:** any 6–20-digit meter number exists, except numbers starting `000`. Numbers ending in `9` report offline, which exercises the manual-token path.
 - **Mock checkout:** served at `/pay/mock/:reference`.
-- **OTP codes:** printed to the server log and returned as `devCode` in development. Staging can opt in with `OTP_DEBUG_ECHO=true`. Never in production.
+- **Login codes and emails:** printed to the server log (no `RESEND_API_KEY`), and codes are returned as `devCode` in development. Staging can opt in with `OTP_DEBUG_ECHO=true`. Never in production.
 
 ## Deploying the API on Vercel
 
@@ -142,7 +142,8 @@ With no credentials set, everything runs against mocks:
 | `CORS_ORIGINS` | The website's origin, e.g. `https://smeter.ng` (or `*`) |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First admin-dashboard account |
 | `CRON_SECRET` | Random string; Vercel Cron uses it to call `/internal/sweep` |
-| `OTP_DEBUG_ECHO` | `true` on staging to see OTPs without SMS |
+| `OTP_DEBUG_ECHO` | `true` on staging to see login codes without email |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Resend key and a sender on your verified domain |
 
 Tables are created automatically on the first request. If the config is invalid the
 API answers every request with `503 misconfigured` and the reason. Uploaded admin
@@ -159,7 +160,7 @@ Paystack webhook settle payments as they happen either way.
 | `GENI_AUTHORIZATION_PASSWORD` | Required by `/API/Token/CreditToken/Generate` |
 | `GENI_TOKEN_TASK_PROTOCOL_ID`, `GENI_DISCONNECT_*`, `GENI_RECONNECT_*` | Remote-task protocol ids/payloads for these meters — confirm with the vendor |
 | `PAYSTACK_SECRET_KEY` | Checkout, webhooks (`POST /v1/webhooks/paystack`), bank resolution, subaccounts |
-| `TERMII_API_KEY` | SMS for OTPs and invites |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Email for login codes, password resets, payout codes and tenant invites (verify your domain in Resend) |
 | `JWT_SECRET`, `PUBLIC_URL`, `APP_ENV=production` | The server refuses to start in production with mocks or a weak secret |
 
 Things to verify against the real head-end once credentials are in (the collection

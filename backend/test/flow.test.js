@@ -69,14 +69,14 @@ test('tariff respects the regulatory cap and base cost', async () => {
 test('meter binding validates the hardware id and prevents double assignment', async () => {
   const unknown = await api.call('POST', '/v1/landlord/meters', {
     token: landlordToken,
-    body: { meterId: '0001112223', address: '1a Bourdillon, Ikoyi', tenantPhone: '08020000000' },
+    body: { meterId: '0001112223', address: '1a Bourdillon, Ikoyi', tenantPhone: '08020000000', tenantEmail: 'nobody@example.com' },
   });
   assert.equal(unknown.status, 400);
 
   const add = await api.call('POST', '/v1/landlord/meters', {
     token: landlordToken,
     body: {
-      meterId: METER, address: '1a Bourdillon, Ikoyi, Lagos', apartment: '1', tenantPhone: '08021112222',
+      meterId: METER, address: '1a Bourdillon, Ikoyi, Lagos', apartment: '1', tenantPhone: '08021112222', tenantEmail: 'daniell@example.com',
       tenantFirstName: 'Daniell', debtAmount: 1000, debtRecoveryPercent: 10,
     },
   });
@@ -85,13 +85,13 @@ test('meter binding validates the hardware id and prevents double assignment', a
 
   const again = await api.call('POST', '/v1/landlord/meters', {
     token: landlordToken,
-    body: { meterId: METER, address: 'Elsewhere', tenantPhone: '08021112222' },
+    body: { meterId: METER, address: 'Elsewhere', tenantPhone: '08021112222', tenantEmail: 'daniell@example.com' },
   });
   assert.equal(again.status, 409);
 
   const offline = await api.call('POST', '/v1/landlord/meters', {
     token: landlordToken,
-    body: { meterId: OFFLINE_METER, address: '1a Bourdillon, Ikoyi, Lagos', apartment: '2', tenantPhone: '08021113333' },
+    body: { meterId: OFFLINE_METER, address: '1a Bourdillon, Ikoyi, Lagos', apartment: '2', tenantPhone: '08021113333', tenantEmail: 'offline@example.com' },
   });
   assert.equal(offline.status, 201);
 });
@@ -102,7 +102,13 @@ test('tenant logs in with meter number + OTP, which accepts the link', async () 
 
   const start = await api.call('POST', '/v1/auth/tenant/start', { body: { meterId: METER } });
   assert.equal(start.status, 200);
-  assert.match(start.body.sentTo, /^\+234802\*{4}22$/);
+  assert.equal(start.body.sentTo, 'd******@example.com');
+  assert.equal(start.body.channel, 'email');
+  const { sentEmails } = await import('../src/providers/email.js');
+  const mail = sentEmails.at(-1);
+  assert.equal(mail.to, 'daniell@example.com');
+  assert.ok(mail.subject.startsWith(`${start.body.devCode} is your smeter login code`), mail.subject);
+  assert.ok(sentEmails.some((m) => m.to === 'daniell@example.com' && /added your meter/.test(m.subject)), 'invite email sent');
   const wrong = await api.call('POST', '/v1/auth/tenant/verify', { body: { meterId: METER, code: '000000' === start.body.devCode ? '111111' : '000000' } });
   assert.equal(wrong.status, 400);
   const ok = await api.call('POST', '/v1/auth/tenant/verify', { body: { meterId: METER, code: start.body.devCode } });
@@ -252,12 +258,18 @@ test('support tickets are routed to the right department', async () => {
   assert.equal(missing.status, 400);
 });
 
-test('password reset by phone OTP', async () => {
+test('password reset: code emailed to the account, found by email or phone', async () => {
   resetRateLimits(); // every test shares one client IP
-  const unknown = await api.call('POST', '/v1/auth/password/forgot', { body: { phone: '08099999999' } });
+  const unknown = await api.call('POST', '/v1/auth/password/forgot', { body: { identifier: 'nobody@example.com' } });
   assert.equal(unknown.status, 404);
-  assert.equal(unknown.body.error.message, 'Number not found');
+  const byEmail = await api.call('POST', '/v1/auth/password/forgot', { body: { identifier: 'Gabriel@Example.com' } });
+  assert.equal(byEmail.status, 200, byEmail.text);
+  assert.equal(byEmail.body.sentTo, 'g******@example.com');
+  const { sentEmails } = await import('../src/providers/email.js');
+  assert.equal(sentEmails.at(-1).to, 'gabriel@example.com');
+  // Older app builds send { phone }; the code still goes to the account email.
   const forgot = await api.call('POST', '/v1/auth/password/forgot', { body: { phone: '08031234567' } });
+  assert.equal(sentEmails.at(-1).to, 'gabriel@example.com');
   const verify = await api.call('POST', '/v1/auth/password/verify', { body: { phone: '08031234567', code: forgot.body.devCode } });
   assert.equal(verify.status, 200);
   const reset = await api.call('POST', '/v1/auth/password/reset', { body: { resetToken: verify.body.resetToken, newPassword: 'brand-new-pass' } });
@@ -285,7 +297,7 @@ test('manual-token mode: no OTA push, usage from purchases, no remote switching'
   const MANUAL = '47005550001';
   const add = await api.call('POST', '/v1/landlord/meters', {
     token: landlordToken,
-    body: { meterId: MANUAL, address: '2 Bourdillon, Ikoyi', apartment: '3', tenantPhone: '08024445555', deliveryMode: 'manual' },
+    body: { meterId: MANUAL, address: '2 Bourdillon, Ikoyi', apartment: '3', tenantPhone: '08024445555', tenantEmail: 'manual@example.com', deliveryMode: 'manual' },
   });
   assert.equal(add.status, 201, add.text);
   assert.equal(add.body.meter.deliveryMode, 'manual');

@@ -6,11 +6,11 @@ import { db, now } from '../db.js';
 import { consumeOtp, issueOtp, otpEcho } from '../auth/otp.js';
 import { hashPassword, verifyPassword } from '../auth/password.js';
 import { signAccessToken } from '../auth/tokens.js';
-import { sendSms } from '../providers/sms.js';
+import { codeEmail, maskEmail, sendEmail } from '../providers/email.js';
 import { notify } from '../services/notifications.js';
 import { badRequest, conflict, notFound, unauthorized } from '../util/errors.js';
 import { parse } from '../util/http.js';
-import { maskPhone, normalizePhone } from '../util/phone.js';
+import { normalizePhone } from '../util/phone.js';
 import { rateLimit } from '../util/rateLimit.js';
 import { landlordDto, tenantDto } from './dto.js';
 
@@ -71,23 +71,44 @@ authRoutes.post('/landlord/login', authLimiter, async (req, res) => {
   res.json({ token: await signAccessToken({ role: 'landlord', sub: landlord.id }), landlord: landlordDto(landlord) });
 });
 
-// ---- Password reset by SMS OTP (SM-SEC-001) ------------------------------
+// ---- Password reset by email code (SM-SEC-001) ----------------------------
+// The owner identifies themselves by email or phone; the code always goes to
+// the account's email address.
 
 const resetKey = () => new TextEncoder().encode(`${config.jwtSecret}:password-reset`);
 
+// Accepts { identifier } (email or phone); older app builds send { phone }.
+const accountIdentifier = z
+  .object({ identifier: z.string().trim().optional(), email: z.string().trim().optional(), phone: z.string().trim().optional() })
+  .transform((b, ctx) => {
+    const v = b.identifier || b.email || b.phone || '';
+    if (v.length < 3) ctx.addIssue({ code: 'custom', message: 'Enter your email or phone number', path: ['identifier'] });
+    return v;
+  });
+
+async function findAccount(identifier) {
+  const landlord = await db().get(
+    'SELECT id, email FROM landlords WHERE email = ? OR phone = ?',
+    identifier.toLowerCase(), normalizePhone(identifier) ?? '',
+  );
+  if (!landlord) throw notFound('We couldn’t find an account with that email or phone number');
+  return landlord;
+}
+
 authRoutes.post('/password/forgot', otpLimiter, async (req, res) => {
-  const { phone } = parse(z.object({ phone: phoneField }), req.body);
-  const landlord = await db().get('SELECT id FROM landlords WHERE phone = ?', phone);
-  if (!landlord) throw notFound('Number not found');
-  const code = await issueOtp({ purpose: 'password_reset', subject: phone });
-  await sendSms(phone, `Your smeter password reset code is ${code}. It expires in ${config.otp.ttlMinutes} minutes.`);
-  res.json({ sentTo: maskPhone(phone), expiresInMinutes: config.otp.ttlMinutes, ...otpEcho(code) });
+  const identifier = parse(accountIdentifier, req.body);
+  const landlord = await findAccount(identifier);
+  const code = await issueOtp({ purpose: 'password_reset', subject: `landlord:${landlord.id}` });
+  await sendEmail(codeEmail({ to: landlord.email, purpose: 'password reset', code }));
+  res.json({ sentTo: maskEmail(landlord.email), channel: 'email', expiresInMinutes: config.otp.ttlMinutes, ...otpEcho(code) });
 });
 
 authRoutes.post('/password/verify', otpLimiter, async (req, res) => {
-  const { phone, code } = parse(z.object({ phone: phoneField, code: z.string().trim() }), req.body);
-  await consumeOtp({ purpose: 'password_reset', subject: phone, code });
-  const resetToken = await new SignJWT({ phone })
+  const identifier = parse(accountIdentifier, req.body);
+  const { code } = parse(z.object({ code: z.string().trim() }).passthrough(), req.body);
+  const landlord = await findAccount(identifier);
+  await consumeOtp({ purpose: 'password_reset', subject: `landlord:${landlord.id}`, code });
+  const resetToken = await new SignJWT({ sub: String(landlord.id) })
     .setProtectedHeader({ alg: 'HS256' })
     .setExpirationTime('10m')
     .sign(resetKey());
@@ -96,18 +117,18 @@ authRoutes.post('/password/verify', otpLimiter, async (req, res) => {
 
 authRoutes.post('/password/reset', authLimiter, async (req, res) => {
   const body = parse(z.object({ resetToken: z.string().min(10), newPassword: password }), req.body);
-  let phone;
+  let id;
   try {
-    ({ payload: { phone } } = await jwtVerify(body.resetToken, resetKey(), { algorithms: ['HS256'] }));
+    ({ payload: { sub: id } } = await jwtVerify(body.resetToken, resetKey(), { algorithms: ['HS256'] }));
   } catch {
     throw badRequest('This reset session has expired. Start again.');
   }
-  const r = await db().run('UPDATE landlords SET password_hash = ? WHERE phone = ?', await hashPassword(body.newPassword), phone);
-  if (r.changes !== 1) throw notFound('Number not found');
+  const r = await db().run('UPDATE landlords SET password_hash = ? WHERE id = ?', await hashPassword(body.newPassword), Number(id));
+  if (r.changes !== 1) throw badRequest('This reset session has expired. Start again.');
   res.json({ ok: true });
 });
 
-// ---- Tenant: meter number → SMS OTP to the phone the landlord registered ---
+// ---- Tenant: meter number → emailed code to the address the owner registered ---
 
 const linkedMeter = (meterId) =>
   db().get("SELECT * FROM meters WHERE meter_id = ? AND status IN ('invited','active')", meterId);
@@ -118,9 +139,12 @@ authRoutes.post('/tenant/start', otpLimiter, async (req, res) => {
   if (!meter) {
     throw notFound("This meter number isn't registered on smeter yet. Ask your property owner to add it.");
   }
+  if (!meter.tenant_email) {
+    throw conflict('There’s no email address on this meter yet. Ask your property owner to add your email in the smeter app.');
+  }
   const code = await issueOtp({ purpose: 'tenant_login', subject: meterId });
-  await sendSms(meter.tenant_phone, `Your smeter login code for meter ${meterId} is ${code}. It expires in ${config.otp.ttlMinutes} minutes.`);
-  res.json({ sentTo: maskPhone(meter.tenant_phone), expiresInMinutes: config.otp.ttlMinutes, ...otpEcho(code) });
+  await sendEmail(codeEmail({ to: meter.tenant_email, purpose: 'login', code, detail: `For meter ${meterId}.` }));
+  res.json({ sentTo: maskEmail(meter.tenant_email), channel: 'email', expiresInMinutes: config.otp.ttlMinutes, ...otpEcho(code) });
 });
 
 authRoutes.post('/tenant/verify', otpLimiter, async (req, res) => {

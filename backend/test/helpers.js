@@ -5,7 +5,8 @@ delete process.env.POSTGRES_URL;
 process.env.PGLITE_DIR = 'memory';
 process.env.GENI_MODE = 'mock';
 process.env.PAYMENTS_PROVIDER = 'mock';
-process.env.SMS_PROVIDER = 'log';
+process.env.EMAIL_PROVIDER = 'log';
+delete process.env.RESEND_API_KEY;
 process.env.OTP_DEBUG_ECHO = 'true';
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret';
 
