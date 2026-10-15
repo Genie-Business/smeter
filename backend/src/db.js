@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS meters (
 );
 CREATE INDEX IF NOT EXISTS meters_landlord ON meters(landlord_id);
 
+-- How often an owner's share is paid out (Paystack subaccount settlement schedule).
+ALTER TABLE landlords ADD COLUMN IF NOT EXISTS payout_schedule TEXT NOT NULL DEFAULT 'daily'
+  CHECK (payout_schedule IN ('daily','weekly','monthly'));
+
 CREATE TABLE IF NOT EXISTS purchases (
   ${ID},
   reference          TEXT NOT NULL UNIQUE,         -- unique per payment attempt

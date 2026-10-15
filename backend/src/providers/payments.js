@@ -4,6 +4,9 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { config } from '../config.js';
 import { db } from '../db.js';
 
+// Our payout intervals → Paystack subaccount settlement_schedule values.
+export const PAYSTACK_SCHEDULE = { daily: 'auto', weekly: 'weekly', monthly: 'monthly' };
+
 class PaystackPayments {
   name = 'paystack';
 
@@ -77,14 +80,20 @@ class PaystackPayments {
     return { accountName: data.account_name };
   }
 
-  async createSettlementAccount({ businessName, bankCode, accountNumber }) {
+  async createSettlementAccount({ businessName, bankCode, accountNumber, schedule = 'daily' }) {
     const data = await this.call('POST', '/subaccount', {
       business_name: businessName,
       settlement_bank: bankCode,
       account_number: accountNumber,
       percentage_charge: 0, // per-transaction split is set via transaction_charge
+      settlement_schedule: PAYSTACK_SCHEDULE[schedule],
     });
     return { settlementRef: data.subaccount_code };
+  }
+
+  /** How often Paystack pays this owner's share out. */
+  async setSettlementSchedule(settlementRef, schedule) {
+    await this.call('PUT', `/subaccount/${encodeURIComponent(settlementRef)}`, { settlement_schedule: PAYSTACK_SCHEDULE[schedule] });
   }
 }
 
@@ -142,8 +151,16 @@ class MockPayments {
     return { accountName: profileName.toUpperCase() };
   }
 
-  async createSettlementAccount({ accountNumber }) {
-    return { settlementRef: `ACCT_mock${accountNumber.slice(-4)}` };
+  async createSettlementAccount({ accountNumber, schedule = 'daily' }) {
+    const settlementRef = `ACCT_mock${accountNumber.slice(-4)}`;
+    this.schedules.set(settlementRef, schedule);
+    return { settlementRef };
+  }
+
+  schedules = new Map();
+
+  async setSettlementSchedule(settlementRef, schedule) {
+    this.schedules.set(settlementRef, schedule);
   }
 }
 

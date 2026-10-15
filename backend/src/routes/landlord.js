@@ -204,6 +204,7 @@ landlordRoutes.post('/bank/confirm', async (req, res) => {
       businessName: req.landlord.full_name,
       bankCode: pending.bankCode,
       accountNumber: pending.accountNumber,
+      schedule: req.landlord.payout_schedule ?? 'daily',
     }));
   } catch (err) {
     throw upstream(`Could not register the payout account: ${err.message}`);
@@ -221,7 +222,55 @@ landlordRoutes.post('/bank/confirm', async (req, res) => {
   res.json({ landlord: landlordDto(await reload(req.landlord.id)) });
 });
 
+// How often the owner's share is paid out. Applied to their Paystack payout
+// account straight away when one exists, and when it's created otherwise.
+const SCHEDULE_LABEL = { daily: 'every working day', weekly: 'weekly', monthly: 'monthly' };
+
+landlordRoutes.put('/payout-schedule', async (req, res) => {
+  const { schedule } = parse(z.object({ schedule: z.enum(['daily', 'weekly', 'monthly']) }), req.body);
+  if (req.landlord.settlement_ref && schedule !== req.landlord.payout_schedule) {
+    try {
+      await payments().setSettlementSchedule(req.landlord.settlement_ref, schedule);
+    } catch (err) {
+      throw upstream(`Could not update your payout schedule: ${err.message}`);
+    }
+  }
+  await db().run('UPDATE landlords SET payout_schedule = ? WHERE id = ?', schedule, req.landlord.id);
+  if (schedule !== req.landlord.payout_schedule) {
+    await notify({
+      recipientType: 'landlord', recipientId: req.landlord.id, kind: 'security',
+      title: 'Payout schedule changed',
+      body: `Your earnings will now be paid out ${SCHEDULE_LABEL[schedule]}.`,
+    });
+  }
+  res.json({ landlord: landlordDto(await reload(req.landlord.id)) });
+});
+
 // ---- Meters / tenancy (SM-TNS-001) -----------------------------------------
+
+// Check a meter number with the metering platform before adding it.
+landlordRoutes.get('/meters/check/:meterId', async (req, res) => {
+  const { meterId } = parse(z.object({ meterId: z.string().trim().regex(/^\d{6,20}$/, 'Enter the serial number printed on the meter') }), req.params);
+  const mine = await db().get("SELECT landlord_id FROM meters WHERE meter_id = ? AND status != 'removed'", meterId);
+  let info;
+  try {
+    info = await geni().getMeter(meterId);
+  } catch (err) {
+    throw asUpstream(err);
+  }
+  res.json({
+    meterId,
+    found: Boolean(info),
+    threePhase: info ? info.isThreePhase : null,
+    available: Boolean(info) && !mine,
+    alreadyYours: Boolean(mine) && mine.landlord_id === req.landlord.id,
+    message: !info
+      ? "This meter isn't on the metering platform. Check the number printed on the meter."
+      : mine
+        ? mine.landlord_id === req.landlord.id ? 'You have already added this meter.' : 'This meter is already assigned to another property owner.'
+        : `Meter found (${info.isThreePhase ? 'three-phase' : 'single-phase'}). You can add it.`,
+  });
+});
 
 landlordRoutes.get('/meters', async (req, res) => {
   const meters = await db().all("SELECT * FROM meters WHERE landlord_id = ? AND status != 'removed' ORDER BY id DESC", req.landlord.id);

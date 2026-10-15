@@ -22,6 +22,7 @@ export function landlordDto(l) {
       : null,
     unitPrice: koboToNaira(l.unit_price_kobo),
     feeBearer: l.fee_bearer,
+    payoutSchedule: l.payout_schedule ?? 'daily',
     tariffLimits: {
       max: tariffNow().maxUnitPriceNaira,
       baseCost: tariffNow().baseUnitCostNaira,

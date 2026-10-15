@@ -34,6 +34,7 @@ const humanize = (k) => String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[
 
 const STATUS_TONE = { vended: 'ok', pending: 'warn', paid: 'info', vending: 'info', failed: 'bad', abandoned: '', active: 'ok', invited: 'warn', new: 'brand', contacted: 'info', surveyed: 'info', onboarded: 'ok', closed: '' };
 const statusPill = (s) => html`<span class="pill ${STATUS_TONE[s] ?? ''}">${humanize(s)}</span>`;
+const PAYOUT_LABEL = { daily: 'Daily (every working day)', weekly: 'Weekly', monthly: 'Monthly' };
 const modePill = (m) => (m === 'manual' ? html`<span class="pill warn">Manual token</span>` : html`<span class="pill info">GPRS</span>`);
 
 // API
@@ -336,10 +337,10 @@ async function ownerDetail(main, id) {
       <div class="card"><h2>Pricing</h2><dl class="kv">
         <dt>Price per kWh</dt><dd>${l.unitPrice ? naira(l.unitPrice) : 'Not set'}</dd>
         <dt>Service fee paid by</dt><dd>${humanize(l.feeBearer)}</dd>
-        <dt>Address</dt><dd>${l.address || '-'}</dd></dl></div>
+        <dt>Property address</dt><dd>${l.address || '-'}</dd></dl></div>
       <div class="card"><h2>Payout account</h2>${l.bank ? html`<dl class="kv">
         <dt>Bank</dt><dd>${l.bank.bankName}</dd><dt>Account</dt><dd class="mono">${l.bank.accountNumber}</dd>
-        <dt>Name</dt><dd>${l.bank.accountName}</dd><dt>Status</dt><dd>${l.bank.settlementActive ? html`<span class="pill ok">Automatic payouts</span>` : html`<span class="pill warn">Unverified</span>`}</dd></dl>` : html`<p class="muted">No payout account yet.</p>`}</div>
+        <dt>Name</dt><dd>${l.bank.accountName}</dd><dt>Paid out</dt><dd>${PAYOUT_LABEL[l.payoutSchedule] || 'Daily'}</dd><dt>Status</dt><dd>${l.bank.settlementActive ? html`<span class="pill ok">Automatic payouts</span>` : html`<span class="pill warn">Unverified</span>`}</dd></dl>` : html`<p class="muted">No payout account yet.</p>`}</div>
     </div>
     <h2 style="margin:22px 0 10px;font-size:17px">Meters</h2>
     <div class="table-wrap"><table>

@@ -410,3 +410,40 @@ test('a bad tariff prefix is rejected', async () => {
   await assert.rejects(mergeGeniInput({ ...base, tariffPrefix: 'TOO-LONG-PREFIX' }));
   await assert.rejects(mergeGeniInput({ ...base, tariffPrefix: '' }));
 });
+
+test('owner payout schedule: saved, sent to the payout account, validated', async () => {
+  resetRateLimits();
+  const me = await api.call('GET', '/v1/landlord/me', { token: landlordToken });
+  assert.equal(me.body.landlord.payoutSchedule, 'daily');
+  const bad = await api.call('PUT', '/v1/landlord/payout-schedule', { token: landlordToken, body: { schedule: 'hourly' } });
+  assert.equal(bad.status, 400);
+  const weekly = await api.call('PUT', '/v1/landlord/payout-schedule', { token: landlordToken, body: { schedule: 'weekly' } });
+  assert.equal(weekly.status, 200, weekly.text);
+  assert.equal(weekly.body.landlord.payoutSchedule, 'weekly');
+  const { payments } = await import('../src/providers/payments.js');
+  const ref = (await db().get('SELECT settlement_ref FROM landlords WHERE email = ?', 'gabriel@example.com')).settlement_ref;
+  assert.ok(ref, 'owner has a payout account from the earlier test');
+  assert.equal(payments().schedules.get(ref), 'weekly');
+  const n = await api.call('GET', '/v1/landlord/notifications', { token: landlordToken });
+  assert.equal(n.body.data[0].title, 'Payout schedule changed');
+});
+
+test('owner can check a meter number with the metering platform before adding it', async () => {
+  const unknown = await api.call('GET', '/v1/landlord/meters/check/0009990001', { token: landlordToken });
+  assert.equal(unknown.status, 200, unknown.text);
+  assert.equal(unknown.body.found, false);
+  const mine = await api.call('GET', `/v1/landlord/meters/check/${METER}`, { token: landlordToken });
+  assert.deepEqual([mine.body.found, mine.body.available, mine.body.alreadyYours], [true, false, true]);
+  const fresh = await api.call('GET', '/v1/landlord/meters/check/47009998881', { token: landlordToken });
+  assert.deepEqual([fresh.body.found, fresh.body.available], [true, true]);
+  assert.match(fresh.body.message, /You can add it/);
+  const malformed = await api.call('GET', '/v1/landlord/meters/check/12ab', { token: landlordToken });
+  assert.equal(malformed.status, 400);
+  // Another owner's meter shows as taken.
+  const other = await api.call('POST', '/v1/auth/landlord/register', {
+    body: { fullName: 'Second Owner', email: 'second@example.com', phone: '08037778888', password: 'second-owner-1' },
+  });
+  const taken = await api.call('GET', `/v1/landlord/meters/check/${METER}`, { token: other.body.token });
+  assert.deepEqual([taken.body.found, taken.body.available, taken.body.alreadyYours], [true, false, false]);
+  assert.match(taken.body.message, /another property owner/);
+});
