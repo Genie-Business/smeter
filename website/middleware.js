@@ -7,7 +7,7 @@ export default function middleware(request) {
   const host = new URL(request.url).hostname;
   if (host.startsWith('admin.')) {
     return new Response(null, {
-      headers: { 'x-middleware-rewrite': new URL('/admin/index.html', request.url).toString() },
+      headers: { 'x-middleware-rewrite': new URL('/admin', request.url).toString() },
     });
   }
   // Anything else: carry on to the static site.
