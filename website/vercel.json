@@ -1,4 +1,28 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/admin",
+      "has": [{ "type": "host", "value": "(www\\.)?smeter\\.app" }],
+      "destination": "https://admin.smeter.app/",
+      "permanent": false
+    },
+    {
+      "source": "/admin/",
+      "has": [{ "type": "host", "value": "(www\\.)?smeter\\.app" }],
+      "destination": "https://admin.smeter.app/",
+      "permanent": false
+    }
+  ],
+  "rewrites": [
+    { "source": "/", "has": [{ "type": "host", "value": "admin.smeter.app" }], "destination": "/admin/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "admin.smeter.app" }],
+      "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }]
+    }
+  ]
 }

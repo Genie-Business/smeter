@@ -11,7 +11,7 @@ export const SITE_DEFAULTS = {
   contact: {
     tenantLine: '+234 800 000 0001',
     ownerLine: '+234 800 000 0002',
-    email: 'hello@smeter.ng',
+    email: 'hello@smeter.app',
     whatsapp: '+234 800 000 0001',
     address: 'Lagos, Nigeria',
   },
@@ -185,7 +185,7 @@ export const APP_DEFAULTS = {
   },
   support: {
     phone: '+234 800 000 0001',
-    email: 'support@smeter.ng',
+    email: 'support@smeter.app',
     whatsapp: '+234 800 000 0001',
   },
   buy: {

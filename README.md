@@ -129,6 +129,20 @@ With no credentials set, everything runs against mocks:
 - **Mock checkout:** served at `/pay/mock/:reference`.
 - **Login codes and emails:** printed to the server log (no `RESEND_API_KEY`), and codes are returned as `devCode` in development. Staging can opt in with `OTP_DEBUG_ECHO=true`. Never in production.
 
+## Domains
+
+| Address | What | Vercel project |
+|---|---|---|
+| `www.smeter.app` (`smeter.app` redirects) | Website | website (root `website`) |
+| `admin.smeter.app` | Admin dashboard (`www.smeter.app/admin` redirects here) | website, same project |
+| `api.smeter.app` | API, Paystack webhook `/v1/webhooks/paystack`, checkout return `/pay/return` | backend (root `backend`) |
+| `no-reply@smeter.app` | Sender for login codes and invites (Resend; domain verified by DNS) | — |
+
+`website/vercel.json` serves the dashboard at the root of `admin.smeter.app` and
+redirects `/admin` on the website there. The website and admin call the API at
+`https://api.smeter.app` (`website/assets/config.js`); the app's default
+`API_BASE_URL` is the same.
+
 ## Deploying the API on Vercel
 
 `backend/` deploys as one serverless function (`backend/api/index.js`, routed by
@@ -139,7 +153,7 @@ With no credentials set, everything runs against mocks:
 | `DATABASE_URL` | Neon Postgres — use the **pooled** connection string (`…-pooler…`) |
 | `APP_ENV` | `staging` (allows mocks) or `production` (requires real Geni + Paystack) |
 | `JWT_SECRET` | 32+ random characters |
-| `CORS_ORIGINS` | The website's origin, e.g. `https://smeter.ng` (or `*`) |
+| `CORS_ORIGINS` | The website's origin, `https://www.smeter.app,https://smeter.app,https://admin.smeter.app` |
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | First admin-dashboard account |
 | `CRON_SECRET` | Random string; Vercel Cron uses it to call `/internal/sweep` |
 | `OTP_DEBUG_ECHO` | `true` on staging to see login codes without email |

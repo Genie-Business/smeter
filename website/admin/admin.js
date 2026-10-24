@@ -1,7 +1,10 @@
 // smeter admin dashboard: vanilla JS, hash-routed, talks to /v1/staff/*.
 const API = (window.SMETER_API || '').replace(/\/$/, '');
-// The dashboard lives at <site>/admin/, so the website is one level up.
-const SITE = new URL('..', location.href).href.replace(/\/$/, '');
+// On admin.smeter.app the website is www.smeter.app; elsewhere the dashboard
+// lives at <site>/admin/, so the website is one level up.
+const SITE = location.hostname.startsWith('admin.')
+  ? `${location.protocol}//${location.hostname.replace(/^admin\./, 'www.')}`
+  : new URL('..', location.href).href.replace(/\/$/, '');
 const app = document.getElementById('app');
 const TOKEN_KEY = 'smeter.staff.token';
 
