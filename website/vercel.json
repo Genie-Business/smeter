@@ -15,9 +15,6 @@
       "permanent": false
     }
   ],
-  "rewrites": [
-    { "source": "/", "has": [{ "type": "host", "value": "admin.smeter.app" }], "destination": "/admin/index.html" }
-  ],
   "headers": [
     {
       "source": "/(.*)",
