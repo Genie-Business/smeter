@@ -25,7 +25,10 @@ webhookRoutes.post('/paystack', express.raw({ type: '*/*', limit: '1mb' }), asyn
   // Settle before acknowledging: serverless hosts may freeze the function once
   // the response is sent. Processing is idempotent; on failure the event is
   // forgotten so Paystack's retry (or the sweeper) picks it up again.
-  if (event?.event === 'charge.success' && event.data?.reference) {
+  // The Paystack account is shared with other company products: acknowledge and
+  // skip any charge that isn't one of our purchases.
+  const ours = event?.data?.reference && (await getPurchase(String(event.data.reference)));
+  if (event?.event === 'charge.success' && ours) {
     const eventId = `paystack:${event.data.id ?? event.data.reference}`;
     const seen = await db().run(
       'INSERT INTO webhook_events (id, provider, event) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING',

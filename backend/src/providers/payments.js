@@ -7,6 +7,19 @@ import { db } from '../db.js';
 // Our payout intervals → Paystack subaccount settlement_schedule values.
 export const PAYSTACK_SCHEDULE = { daily: 'auto', weekly: 'weekly', monthly: 'monthly' };
 
+// The Paystack account is shared with the company's other products, so every
+// transaction and subaccount smeter creates carries this tag.
+export const PRODUCT_TAG = 'smeter';
+
+/** Metadata with the product tag, plus custom_fields so the Paystack dashboard shows it. */
+export function taggedMetadata(metadata = {}) {
+  const field = (display_name, variable_name, value) => ({ display_name, variable_name, value: String(value) });
+  const fields = [field('Product', 'product', PRODUCT_TAG)];
+  if (metadata.meterId) fields.push(field('Meter', 'meter_id', metadata.meterId));
+  if (metadata.landlordId) fields.push(field('Property owner ID', 'landlord_id', metadata.landlordId));
+  return { ...metadata, product: PRODUCT_TAG, custom_fields: fields };
+}
+
 class PaystackPayments {
   name = 'paystack';
 
@@ -38,7 +51,7 @@ class PaystackPayments {
       currency: 'NGN',
       callback_url: callbackUrl,
       channels: channels ?? config.payments.channels,
-      metadata,
+      metadata: taggedMetadata(metadata),
     };
     if (split?.subaccount) {
       body.subaccount = split.subaccount;
@@ -87,6 +100,8 @@ class PaystackPayments {
       account_number: accountNumber,
       percentage_charge: 0, // per-transaction split is set via transaction_charge
       settlement_schedule: PAYSTACK_SCHEDULE[schedule],
+      description: `${PRODUCT_TAG} property owner payouts`,
+      metadata: JSON.stringify({ product: PRODUCT_TAG }),
     });
     return { settlementRef: data.subaccount_code };
   }

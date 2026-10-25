@@ -283,6 +283,16 @@ test('webhook with a bad signature is rejected', async () => {
   assert.equal(r.status, 401);
 });
 
+test('Paystack metadata is tagged as smeter for the shared company account', async () => {
+  const { taggedMetadata } = await import('../src/providers/payments.js');
+  const m = taggedMetadata({ meterId: METER, landlordId: 4, units: 2.5 });
+  assert.equal(m.product, 'smeter');
+  assert.equal(m.units, 2.5);
+  assert.deepEqual(m.custom_fields.map((f) => [f.variable_name, f.value]), [
+    ['product', 'smeter'], ['meter_id', METER], ['landlord_id', '4'],
+  ]);
+});
+
 test('roles are enforced', async () => {
   const a = await api.call('GET', '/v1/landlord/dashboard', { token: tenantToken });
   assert.equal(a.status, 403);
