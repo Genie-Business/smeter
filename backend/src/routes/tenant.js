@@ -4,8 +4,9 @@ import { db } from '../db.js';
 import { requireTenant } from '../auth/middleware.js';
 import { geni } from '../geni/index.js';
 import { listNotifications, markAllRead, unreadCount } from '../services/notifications.js';
+import { accrueServiceCharge } from '../services/service-charge.js';
 import { liveReading, monthSummary, unitsBalance, usageReport } from '../services/usage.js';
-import { createPurchase, getPurchase, purchaseDto, quoteFor, settlePayment } from '../services/vending.js';
+import { createPurchase, createServicePayment, getPurchase, purchaseDto, quoteFor, settlePayment } from '../services/vending.js';
 import { badRequest, notFound } from '../util/errors.js';
 import { koboToNaira, nairaToKobo, pageParams, parse } from '../util/http.js';
 import { tenantDto } from './dto.js';
@@ -41,6 +42,7 @@ tenantRoutes.patch('/me', async (req, res) => {
 });
 
 tenantRoutes.get('/dashboard', async (req, res) => {
+  req.meter = await accrueServiceCharge(req.meter); // bills a new month before showing what's due
   const [recent, landlord, last, points, month, unread] = await Promise.all([
     db().all(
       `SELECT * FROM purchases WHERE meter_id = ? AND status IN ('vended','paid','vending','pending')
@@ -106,6 +108,19 @@ tenantRoutes.post('/purchases', async (req, res) => {
     channel,
   });
   res.status(201).json({ reference: result.reference, authorizationUrl: result.authorizationUrl, quote: quoteDto(result.quote) });
+});
+
+// Pay the outstanding GPRS service charge on its own (when the tenant pays it).
+tenantRoutes.post('/service-charge', async (req, res) => {
+  const { channel } = parse(z.object({ channel: channelField }), req.body ?? {});
+  const result = await createServicePayment({ meter: req.meter, landlord: await landlordOf(req.meter), channel });
+  res.status(201).json({
+    reference: result.reference,
+    authorizationUrl: result.authorizationUrl,
+    amount: koboToNaira(result.amount),
+    fee: koboToNaira(result.fee),
+    total: koboToNaira(result.total),
+  });
 });
 
 tenantRoutes.get('/purchases', async (req, res) => {

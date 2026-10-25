@@ -420,12 +420,22 @@ class ModeBadge extends StatelessWidget {
 }
 
 class InfoBanner extends StatelessWidget {
-  const InfoBanner({super.key, required this.icon, required this.text, this.tone = Tone.info, this.title});
+  const InfoBanner({
+    super.key,
+    required this.icon,
+    required this.text,
+    this.tone = Tone.info,
+    this.title,
+    this.actionLabel,
+    this.onAction,
+  });
 
   final IconData icon;
   final String? title;
   final String text;
   final Tone tone;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -441,6 +451,10 @@ class InfoBanner extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (title != null) Text(title!, style: SmeterText.bodyStrong(color: fg)),
             Text(text, style: SmeterText.small(color: SmeterColors.inkSoft)),
+            if (actionLabel != null) ...[
+              const SizedBox(height: Space.sm),
+              FilledButton.tonal(onPressed: onAction, child: Text(actionLabel!)),
+            ],
           ]),
         ),
       ]),
@@ -782,6 +796,7 @@ class PurchaseRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = purchase;
     final (icon, tone) = switch (p.status) {
+      'vended' when p.isService => (Icons.cell_tower_rounded, Tone.success),
       'vended' when p.delivery == 'manual' => (Icons.vpn_key_rounded, Tone.success),
       'vended' => (Icons.bolt_rounded, Tone.success),
       'failed' => (Icons.close_rounded, Tone.danger),
@@ -791,7 +806,7 @@ class PurchaseRow extends StatelessWidget {
     final (fg, bg) = toneColors(tone);
     final sub = [
       ?subtitlePrefix,
-      if (p.units != null) '${units(p.units)} kWh',
+      if (p.isService) 'Meter service charge' else if (p.units != null) '${units(p.units)} kWh',
       timeOfDay(p.vendedAt ?? p.createdAt),
     ].join(' · ');
     return InkWell(

@@ -5,15 +5,17 @@
 //   pending -> failed    when the payment fails
 // Every transition is a conditional UPDATE on the current status, so duplicate
 // webhooks, the redirect callback and the sweeper can race safely (idempotent).
+// A service-charge payment (kind 'service') goes paid -> vended with no token.
 import { randomBytes } from 'node:crypto';
 import { config } from '../config.js';
 import { db, now, tx } from '../db.js';
 import { geni, geniMode, refreshGeni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
-import { badRequest, notFound, upstream } from '../util/errors.js';
+import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
 import { koboToNaira } from '../util/http.js';
 import { notify } from './notifications.js';
-import { quote } from './pricing.js';
+import { grossUp, quote } from './pricing.js';
+import { accrueServiceCharge, applyServicePayment, serviceInput } from './service-charge.js';
 import { getTariffSettings, paymentParams } from './settings.js';
 
 const naira = (kobo) => `₦${koboToNaira(kobo).toLocaleString('en-NG', { minimumFractionDigits: 2 })}`;
@@ -22,7 +24,7 @@ export function newReference() {
   return `SM${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`;
 }
 
-export async function quoteFor(meter, landlord, amountKobo, params) {
+export async function quoteFor(meter, landlord, amountKobo, params, { initiatedBy = 'tenant' } = {}) {
   return quote({
     amountKobo,
     unitPriceKobo: landlord.unit_price_kobo,
@@ -30,57 +32,100 @@ export async function quoteFor(meter, landlord, amountKobo, params) {
     feeBearer: landlord.fee_bearer,
     debtKobo: meter.debt_kobo,
     debtPercent: meter.debt_recovery_percent,
+    service: await serviceInput(meter, { initiatedBy }),
   }, params ?? (await paymentParams()));
 }
 
-export async function createPurchase({ meter, landlord, amountKobo, initiatedBy, email, channel }) {
-  if (meter.status !== 'active' && initiatedBy === 'tenant') throw badRequest('This meter is not active yet');
-  // Never take real money for tokens from the simulated head-end.
+// Refuse to take money while the head-end is simulated (production only).
+async function requireLiveHeadEnd() {
   await refreshGeni();
   if (config.isProduction && geniMode() !== 'live') {
     throw upstream('Buying power is unavailable right now. Please try again later.');
   }
-  const params = await paymentParams();
-  if (channel && !params.channels.includes(channel)) {
-    throw badRequest('That payment method isn’t available right now. Choose another one.');
-  }
-  const q = await quoteFor(meter, landlord, amountKobo, params);
-  const reference = newReference();
-  const provider = payments();
+}
 
-  await db().run(
-    `INSERT INTO purchases (reference, meter_id, landlord_id, initiated_by, amount_kobo, debt_kobo, energy_kobo,
-       fee_kobo, fee_bearer, total_kobo, landlord_net_kobo, unit_price_kobo, base_cost_kobo, provider)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    reference, meter.meter_id, landlord.id, initiatedBy, q.amountKobo, q.debtKobo, q.energyKobo,
-    q.feeKobo, q.feeBearer, q.totalKobo, q.landlordNetKobo, landlord.unit_price_kobo, q.baseKobo, provider.name,
-  );
-
-  let init;
+async function startCheckout(reference, init) {
+  let result;
   try {
-    init = await provider.initialize({
-      reference,
-      amountKobo: q.totalKobo,
-      email: email || meter.tenant_email || `${meter.meter_id}@tenants.smeter.app`,
-      callbackUrl: `${config.publicUrl}/pay/return?reference=${encodeURIComponent(reference)}`,
-      channels: channel ? [channel] : params.channels,
-      metadata: { meterId: meter.meter_id, landlordId: landlord.id, units: q.units },
-      split: landlord.settlement_ref
-        ? {
-            subaccount: landlord.settlement_ref,
-            platformShareKobo: q.platformShareKobo,
-            bearer: q.feeBearer === 'landlord' ? 'subaccount' : 'account',
-          }
-        : undefined,
-    });
+    result = await payments().initialize(init);
   } catch (err) {
     await setStatus(reference, 'pending', 'failed', { failure_reason: `Checkout could not start: ${err.message}` });
     throw upstream('Could not start checkout, please try again');
   }
   await db().run(
     'UPDATE purchases SET authorization_url = ?, updated_at = ? WHERE reference = ?',
-    init.authorizationUrl, now(), reference,
+    result.authorizationUrl, now(), reference,
   );
+  return result;
+}
+
+/**
+ * The tenant pays the outstanding GPRS service charge on its own (no units).
+ * All of it goes to the platform, so there is no owner split.
+ */
+export async function createServicePayment({ meter, landlord, channel }) {
+  const m = await accrueServiceCharge(meter);
+  if (m.service_due_kobo <= 0) throw conflict('There is no service charge to pay right now');
+  const params = await paymentParams();
+  if (channel && !params.channels.includes(channel)) {
+    throw badRequest('That payment method isn’t available right now. Choose another one.');
+  }
+  const due = m.service_due_kobo;
+  const total = grossUp(due, params);
+  const reference = newReference();
+  await db().run(
+    `INSERT INTO purchases (reference, meter_id, landlord_id, initiated_by, amount_kobo, debt_kobo, energy_kobo,
+       fee_kobo, fee_bearer, total_kobo, landlord_net_kobo, unit_price_kobo, base_cost_kobo, provider, kind, service_kobo)
+     VALUES (?, ?, ?, 'tenant', ?, 0, 0, ?, 'tenant', ?, 0, ?, 0, ?, 'service', ?)`,
+    reference, m.meter_id, landlord.id, due, total - due, total, landlord.unit_price_kobo, payments().name, due,
+  );
+  const init = await startCheckout(reference, {
+    reference,
+    amountKobo: total,
+    email: m.tenant_email || `${m.meter_id}@tenants.smeter.app`,
+    callbackUrl: `${config.publicUrl}/pay/return?reference=${encodeURIComponent(reference)}`,
+    channels: channel ? [channel] : params.channels,
+    metadata: { meterId: m.meter_id, landlordId: landlord.id, kind: 'service' },
+  });
+  return { reference, authorizationUrl: init.authorizationUrl, amount: due, fee: total - due, total };
+}
+
+export async function createPurchase({ meter, landlord, amountKobo, initiatedBy, email, channel }) {
+  if (meter.status !== 'active' && initiatedBy === 'tenant') throw badRequest('This meter is not active yet');
+  // Never take real money for tokens from the simulated head-end.
+  await requireLiveHeadEnd();
+  const params = await paymentParams();
+  if (channel && !params.channels.includes(channel)) {
+    throw badRequest('That payment method isn’t available right now. Choose another one.');
+  }
+  const q = await quoteFor(meter, landlord, amountKobo, params, { initiatedBy });
+  const reference = newReference();
+
+  await db().run(
+    `INSERT INTO purchases (reference, meter_id, landlord_id, initiated_by, amount_kobo, debt_kobo, energy_kobo,
+       fee_kobo, fee_bearer, total_kobo, landlord_net_kobo, unit_price_kobo, base_cost_kobo, provider,
+       service_kobo, service_owner_kobo, service_days)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    reference, meter.meter_id, landlord.id, initiatedBy, q.amountKobo, q.debtKobo, q.energyKobo,
+    q.feeKobo, q.feeBearer, q.totalKobo, q.landlordNetKobo, landlord.unit_price_kobo, q.baseKobo, payments().name,
+    q.serviceKobo, q.serviceOwnerKobo, q.serviceDays,
+  );
+
+  const init = await startCheckout(reference, {
+    reference,
+    amountKobo: q.totalKobo,
+    email: email || meter.tenant_email || `${meter.meter_id}@tenants.smeter.app`,
+    callbackUrl: `${config.publicUrl}/pay/return?reference=${encodeURIComponent(reference)}`,
+    channels: channel ? [channel] : params.channels,
+    metadata: { meterId: meter.meter_id, landlordId: landlord.id, units: q.units },
+    split: landlord.settlement_ref
+      ? {
+          subaccount: landlord.settlement_ref,
+          platformShareKobo: q.platformShareKobo,
+          bearer: q.feeBearer === 'landlord' ? 'subaccount' : 'account',
+        }
+      : undefined,
+  });
   return { reference, authorizationUrl: init.authorizationUrl, quote: q };
 }
 
@@ -140,6 +185,18 @@ export async function settlePayment(reference, { source = 'callback' } = {}) {
 export async function vend(reference) {
   if (!(await setStatus(reference, 'paid', 'vending'))) return getPurchase(reference);
   const p = await getPurchase(reference);
+  if (p.kind === 'service') {
+    await tx(async () => {
+      await setStatus(reference, 'vending', 'vended', { vended_at: now(), units: 0, failure_reason: null });
+      await applyServicePayment(p);
+    });
+    await notify({
+      recipientType: 'tenant', recipientId: p.meter_id, kind: 'service',
+      title: 'Service charge paid',
+      body: `Thanks, ${naira(p.service_kobo)} service charge received. Your meter stays connected.`,
+    });
+    return getPurchase(reference);
+  }
   const meter = await db().get('SELECT * FROM meters WHERE meter_id = ?', p.meter_id);
   const client = geni();
 
@@ -191,6 +248,7 @@ export async function vend(reference) {
     if (p.debt_kobo > 0) {
       await db().run('UPDATE meters SET debt_kobo = GREATEST(0, debt_kobo - ?) WHERE meter_id = ?', p.debt_kobo, p.meter_id);
     }
+    await applyServicePayment(p);
   });
 
   const units = `${minted.units.toFixed(2)} kWh`;
@@ -218,12 +276,15 @@ export function purchaseDto(p, { includeToken = true } = {}) {
     reference: p.reference,
     meterId: p.meter_id,
     status: p.status,
+    kind: p.kind ?? 'units',
     initiatedBy: p.initiated_by,
     amount: koboToNaira(p.amount_kobo),
     debtRecovered: koboToNaira(p.debt_kobo),
     energyAmount: koboToNaira(p.energy_kobo),
     fee: koboToNaira(p.fee_kobo),
     feeBearer: p.fee_bearer,
+    serviceCharge: koboToNaira((p.service_kobo ?? 0) - (p.service_owner_kobo ?? 0)), // paid by the buyer
+    serviceDays: p.service_days ?? 0,
     total: koboToNaira(p.total_kobo),
     unitPrice: koboToNaira(p.unit_price_kobo),
     units: p.units,
@@ -241,6 +302,7 @@ export function landlordPurchaseDto(p) {
   return {
     ...purchaseDto(p),
     landlordNet: koboToNaira(p.landlord_net_kobo),
+    ownerServiceCharge: koboToNaira(p.service_owner_kobo ?? 0), // taken from the owner's share
     baseCost: koboToNaira(p.base_cost_kobo),
     markup: koboToNaira(p.energy_kobo - p.base_cost_kobo),
   };

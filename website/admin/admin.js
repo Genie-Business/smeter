@@ -898,6 +898,19 @@ const TARIFF_FIELDS = [
   ['maxUnitPriceNaira', 'Maximum price per kWh', 'The highest price an owner can charge (the regulated cap).'],
   ['baseUnitCostNaira', 'Utility cost per kWh', 'What smeter pays the utility for each kWh. Owners can’t price below it; the difference is their margin.'],
 ];
+// GPRS service charge: keeps automatic-delivery meters online. The owner picks
+// who pays it (owner, tenant monthly, or per purchase) for each meter.
+const SERVICE_FIELDS = [
+  ['gprsFeeSinglePhaseNaira', 'Single-phase meter, per month', 'Monthly service charge for a single-phase GPRS meter.', '₦'],
+  ['gprsFeeThreePhaseNaira', 'Three-phase meter, per month', 'Monthly service charge for a three-phase GPRS meter.', '₦'],
+  ['typicalDailyKwh', 'Typical daily use', 'When tenants pay per purchase, each purchase pays for the days its units should last, from the meter’s own usage. A new meter with no history uses this.', 'kWh'],
+];
+const priceField = (s, defaults, canEdit, [key, label, hint, unit = '₦']) => html`
+  <div class="field">
+    <label for="t-${key}">${label}</label>
+    <div class="affix ${unit === '₦' ? 'pre' : 'post'}">${unit === '₦' ? html`<span>₦</span>` : ''}<input class="input" id="t-${key}" data-key="${key}" type="number" inputmode="decimal" min="0" step="0.5" value="${s[key]}" ${canEdit ? '' : raw('disabled')}>${unit === '₦' ? '' : html`<span>${unit}</span>`}</div>
+    <div class="hint">${hint} <span class="muted">Default: ${unit === '₦' ? `₦${num(defaults[key])}` : `${num(defaults[key])} ${unit}`}</span></div>
+  </div>`;
 
 async function tariffSettings(main) {
   const r = await api('/settings/tariff');
@@ -905,28 +918,28 @@ async function tariffSettings(main) {
   let saved = r.settings;
   let s = structuredClone(saved);
   let impact = r.impact;
-  const pick = (x) => Object.fromEntries(TARIFF_FIELDS.map(([k]) => [k, Number(x[k])]));
+  const pick = (x) => Object.fromEntries([...TARIFF_FIELDS, ...SERVICE_FIELDS].map(([k]) => [k, Number(x[k])]));
   const dirty = () => JSON.stringify(pick(s)) !== JSON.stringify(pick(saved));
   leaveGuard = dirty;
 
   render(main, html`
-    <div class="page-head"><div><h1>Pricing</h1><p>Property owners set their own price per kWh between these limits. Changes apply within a few seconds.</p></div></div>
+    <div class="page-head"><div><h1>Pricing</h1><p>Property owners set their own price per kWh between these limits. The GPRS service charge applies to meters on automatic delivery. Changes apply within a few seconds.</p></div></div>
     ${canEdit ? '' : html`<div class="card" style="margin-bottom:14px"><p class="muted" style="margin:0">Only account owners can change pricing limits.</p></div>`}
     <div id="tar-err"></div>
     <div class="grid g2" style="align-items:start">
       <div class="card">
         <h2>Unit price limits</h2>
-        ${TARIFF_FIELDS.map(([key, label, hint]) => html`
-          <div class="field">
-            <label for="t-${key}">${label}</label>
-            <div class="affix pre"><span>₦</span><input class="input" id="t-${key}" data-key="${key}" type="number" inputmode="decimal" min="0" step="0.5" value="${s[key]}" ${canEdit ? '' : raw('disabled')}></div>
-            <div class="hint">${hint} <span class="muted">Default: ₦${num(r.defaults[key])}</span></div>
-          </div>`)}
+        ${TARIFF_FIELDS.map((f) => priceField(s, r.defaults, canEdit, f))}
       </div>
       <div class="card">
         <h2>What owners can charge</h2>
         <div id="tar-summary"></div>
         <div id="tar-impact" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <h2>GPRS service charge</h2>
+        <p class="muted" style="margin-top:0">Keeps meters on automatic delivery online. For each meter, the owner chooses who pays: the owner (taken from tenant payments), the tenant every month (unpaid months are added to their next purchase), or the tenant at every purchase.</p>
+        ${SERVICE_FIELDS.map((f) => priceField(s, r.defaults, canEdit, f))}
       </div>
     </div>
     <div class="savebar">
@@ -989,7 +1002,7 @@ async function tariffSettings(main) {
     if (impact?.belowCost && !confirm(`${impact.belowCost} owner(s) will be priced below the utility cost, so their tenants can’t buy power until they raise their price. Save anyway?`)) return;
     b.disabled = true;
     try {
-      apply(await api('/settings/tariff', { method: 'PUT', body: pick(s) }), 'Pricing limits saved');
+      apply(await api('/settings/tariff', { method: 'PUT', body: pick(s) }), 'Pricing saved');
     } catch (err) {
       showErr(err.message);
     } finally {
@@ -997,9 +1010,9 @@ async function tariffSettings(main) {
     }
   });
   main.querySelector('#tar-reset')?.addEventListener('click', async () => {
-    if (!confirm('Reset the pricing limits to the defaults?')) return;
+    if (!confirm('Reset the pricing limits and service charge to the defaults?')) return;
     try {
-      apply(await api('/settings/tariff/reset', { method: 'POST' }), 'Pricing limits reset to defaults');
+      apply(await api('/settings/tariff/reset', { method: 'POST' }), 'Pricing reset to defaults');
     } catch (err) {
       showErr(err.message);
     }

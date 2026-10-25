@@ -112,6 +112,11 @@ export const config = {
     maxUnitPriceNaira: num('MAX_UNIT_PRICE_NAIRA', 250),
     // Base utility cost per kWh, used for the profit/markup ledger.
     baseUnitCostNaira: num('BASE_UNIT_COST_NAIRA', 209.5),
+    // Monthly service charge that keeps a GPRS (automatic delivery) meter online.
+    gprsFeeSinglePhaseNaira: num('GPRS_FEE_SINGLE_PHASE_NAIRA', 1500),
+    gprsFeeThreePhaseNaira: num('GPRS_FEE_THREE_PHASE_NAIRA', 2500),
+    // Daily use assumed for a meter with no purchase history (per-purchase charging).
+    typicalDailyKwh: num('TYPICAL_DAILY_KWH', 5),
   },
 
   email: {

@@ -7,12 +7,15 @@ class Purchase {
     : reference = j['reference'] as String,
       meterId = j['meterId'] as String,
       status = j['status'] as String,
+      kind = j['kind'] as String? ?? 'units',
       initiatedBy = j['initiatedBy'] as String? ?? 'tenant',
       amount = _d(j['amount']) ?? 0,
       debtRecovered = _d(j['debtRecovered']) ?? 0,
       energyAmount = _d(j['energyAmount']) ?? 0,
       fee = _d(j['fee']) ?? 0,
       feeBearer = j['feeBearer'] as String? ?? 'tenant',
+      serviceCharge = _d(j['serviceCharge']) ?? 0,
+      serviceDays = _d(j['serviceDays']) ?? 0,
       total = _d(j['total']) ?? 0,
       unitPrice = _d(j['unitPrice']) ?? 0,
       units = _d(j['units']),
@@ -23,17 +26,27 @@ class Purchase {
       createdAt = j['createdAt'] as String?,
       vendedAt = j['vendedAt'] as String?,
       landlordNet = _d(j['landlordNet']),
+      ownerServiceCharge = _d(j['ownerServiceCharge']) ?? 0,
       markup = _d(j['markup']);
 
   final String reference;
   final String meterId;
   final String status;
+
+  /// 'units' (a power purchase) or 'service' (the GPRS service charge on its own).
+  final String kind;
   final String initiatedBy;
   final double amount;
   final double debtRecovered;
   final double energyAmount;
   final double fee;
   final String feeBearer;
+
+  /// GPRS service charge the buyer paid in this payment.
+  final double serviceCharge;
+
+  /// Days of service paid ahead (per-purchase charging).
+  final double serviceDays;
   final double total;
   final double unitPrice;
   final double? units;
@@ -44,8 +57,12 @@ class Purchase {
   final String? createdAt;
   final String? vendedAt;
   final double? landlordNet;
+
+  /// Service charge taken from the owner's share (owner's view).
+  final double ownerServiceCharge;
   final double? markup;
 
+  bool get isService => kind == 'service';
   bool get isFinal => status == 'vended' || status == 'failed' || status == 'abandoned';
 }
 
@@ -57,6 +74,8 @@ class Quote {
       units = _d(j['units'])!,
       fee = _d(j['fee'])!,
       feeBearer = j['feeBearer'] as String,
+      serviceCharge = _d(j['serviceCharge']) ?? 0,
+      serviceDays = _d(j['serviceDays']) ?? 0,
       total = _d(j['total'])!;
 
   final double amount;
@@ -65,7 +84,35 @@ class Quote {
   final double units;
   final double fee;
   final String feeBearer;
+  final double serviceCharge;
+  final double serviceDays;
   final double total;
+}
+
+/// GPRS service charge that keeps an automatic-delivery meter online.
+class MeterService {
+  MeterService.fromJson(Map<String, dynamic> j)
+    : gprs = j['gprs'] as bool? ?? false,
+      payer = j['payer'] as String? ?? 'owner',
+      monthlyFee = _d(j['monthlyFee']) ?? 0,
+      due = _d(j['due']) ?? 0,
+      ownerDue = _d(j['ownerDue']) ?? 0,
+      billedUntil = j['billedUntil'] as String?;
+
+  static MeterService? from(Object? j) => j == null ? null : MeterService.fromJson(Map<String, dynamic>.from(j as Map));
+
+  final bool gprs;
+
+  /// owner | tenant_monthly | tenant_per_purchase
+  final String payer;
+  final double monthlyFee;
+
+  /// The tenant's unpaid service charge.
+  final double due;
+
+  /// The owner's unpaid service charge (owner's view only).
+  final double ownerDue;
+  final String? billedUntil;
 }
 
 class TenantProfile {
@@ -84,7 +131,8 @@ class TenantProfile {
       landlordPhone = (j['landlord'] as Map?)?['phone'] as String?,
       unitPrice = _d(j['unitPrice']) ?? 0,
       feeBearer = j['feeBearer'] as String? ?? 'tenant',
-      deliveryMode = j['deliveryMode'] as String? ?? 'ota';
+      deliveryMode = j['deliveryMode'] as String? ?? 'ota',
+      service = MeterService.from(j['service']);
 
   final String meterId;
   final String address;
@@ -103,6 +151,7 @@ class TenantProfile {
 
   /// 'ota' (tokens pushed over GPRS) or 'manual' (keyed into the meter remote).
   final String deliveryMode;
+  final MeterService? service;
 
   bool get isManual => deliveryMode == 'manual';
   String get displayName => (firstName?.isNotEmpty ?? false) ? firstName! : 'there';
@@ -139,6 +188,8 @@ class Landlord {
       feeBearer = j['feeBearer'] as String? ?? 'tenant',
       maxUnitPrice = _d((j['tariffLimits'] as Map?)?['max']) ?? 0,
       baseCost = _d((j['tariffLimits'] as Map?)?['baseCost']) ?? 0,
+      gprsFeeSinglePhase = _d((j['tariffLimits'] as Map?)?['gprsFeeSinglePhase']) ?? 0,
+      gprsFeeThreePhase = _d((j['tariffLimits'] as Map?)?['gprsFeeThreePhase']) ?? 0,
       payoutSchedule = j['payoutSchedule'] as String? ?? 'daily';
 
   final int id;
@@ -152,6 +203,10 @@ class Landlord {
   final String feeBearer;
   final double maxUnitPrice;
   final double baseCost;
+
+  /// Monthly GPRS service charge per automatic-delivery meter.
+  final double gprsFeeSinglePhase;
+  final double gprsFeeThreePhase;
 
   /// How often earnings are paid out: daily | weekly | monthly.
   final String payoutSchedule;
@@ -170,7 +225,8 @@ class Meter {
       debt = _d(j['debt']) ?? 0,
       debtRecoveryPercent = _d(j['debtRecoveryPercent']) ?? 0,
       relayState = j['relayState'] as String? ?? 'connected',
-      deliveryMode = j['deliveryMode'] as String? ?? 'ota';
+      deliveryMode = j['deliveryMode'] as String? ?? 'ota',
+      service = MeterService.from(j['service']);
 
   final String meterId;
   final String address;
@@ -186,6 +242,7 @@ class Meter {
   final double debtRecoveryPercent;
   final String relayState;
   final String deliveryMode;
+  final MeterService? service;
 
   bool get isManual => deliveryMode == 'manual';
   bool get isOff => relayState.startsWith('disconnect');
@@ -305,9 +362,11 @@ class Checkout {
   Checkout.fromJson(Map<String, dynamic> j)
     : reference = j['reference'] as String,
       authorizationUrl = j['authorizationUrl'] as String,
-      quote = Quote.fromJson(Map<String, dynamic>.from(j['quote'] as Map));
+      quote = j['quote'] == null ? null : Quote.fromJson(Map<String, dynamic>.from(j['quote'] as Map));
 
   final String reference;
   final String authorizationUrl;
-  final Quote quote;
+
+  /// Null for a service-charge payment.
+  final Quote? quote;
 }

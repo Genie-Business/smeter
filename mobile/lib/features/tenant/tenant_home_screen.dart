@@ -52,6 +52,22 @@ class TenantHomeScreen extends ConsumerWidget {
                   title: 'Supply switched off',
                   text: 'Your property owner has disconnected this meter. Contact them to restore power.',
                 ),
+              if ((t.service?.due ?? 0) > 0)
+                InfoBanner(
+                  icon: Icons.cell_tower_rounded,
+                  tone: Tone.warn,
+                  title: '${naira(t.service!.due)} meter service charge due',
+                  text: 'This keeps your meter online so units arrive automatically. '
+                      'Pay it now, or it is added to your next purchase.',
+                  actionLabel: 'Pay now',
+                  onAction: () async {
+                    try {
+                      await openPayServiceCharge(context, ref, t);
+                    } catch (e) {
+                      if (context.mounted) showError(context, e);
+                    }
+                  },
+                ),
               if (t.debt > 0)
                 InfoBanner(
                   icon: Icons.account_balance_wallet_outlined,

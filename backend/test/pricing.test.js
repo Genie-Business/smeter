@@ -56,3 +56,46 @@ test('quote: rejects missing price and out-of-range amounts', () => {
   assert.throws(() => quote({ amountKobo: 100000, unitPriceKobo: 0, baseCostKobo: 1, feeBearer: 'tenant' }, P), /unit price/);
   assert.throws(() => quote({ amountKobo: 100, unitPriceKobo: 23000, baseCostKobo: 1, feeBearer: 'tenant' }, P), /Minimum/);
 });
+
+// GPRS service charge
+const BASE = { amountKobo: 500000, unitPriceKobo: 23000, baseCostKobo: 20950 };
+const SVC = { tenantDueKobo: 0, ownerDueKobo: 0, monthlyFeeKobo: 150000, dailyKwh: 5, perPurchase: true };
+
+test('service: the owner pays from their share, the rest stays due', () => {
+  const plain = quote({ ...BASE, feeBearer: 'tenant' }, P);
+  const q = quote({ ...BASE, feeBearer: 'tenant', service: { ...SVC, payer: 'owner', ownerDueKobo: 150000 } }, P);
+  assert.equal(q.totalKobo, plain.totalKobo); // the tenant pays nothing extra
+  assert.equal(q.serviceOwnerKobo, plain.landlordNetKobo); // ₦447.57 markup < ₦1,500 due: all of it
+  assert.equal(q.landlordNetKobo, 0);
+  assert.equal(q.platformShareKobo, plain.platformShareKobo + q.serviceOwnerKobo);
+  assert.equal(q.serviceTenantKobo, 0);
+});
+
+test('service: the tenant monthly balance is added on top', () => {
+  const plain = quote({ ...BASE, feeBearer: 'tenant' }, P);
+  const q = quote({ ...BASE, feeBearer: 'tenant', service: { ...SVC, payer: 'tenant_monthly', tenantDueKobo: 150000 } }, P);
+  assert.equal(q.units, plain.units);
+  assert.equal(q.serviceTenantKobo, 150000);
+  assert.equal(q.totalKobo - q.feeKobo, 500000 + 150000);
+  assert.equal(q.landlordNetKobo, plain.landlordNetKobo); // owner unaffected
+  assert.equal(q.platformShareKobo, q.baseKobo + q.feeKobo + 150000);
+});
+
+test('service: per purchase charges the days the units should last', () => {
+  const q = quote({ ...BASE, feeBearer: 'tenant', service: { ...SVC, payer: 'tenant_per_purchase' } }, P);
+  assert.equal(q.units, 21.73);
+  assert.equal(q.serviceDays, 4.3); // 21.73 kWh / 5 kWh a day
+  assert.equal(q.serviceTenantKobo, Math.round((150000 * 4.3) / 30)); // ₦215
+  const manual = quote({ ...BASE, feeBearer: 'tenant', service: { ...SVC, payer: 'tenant_per_purchase', perPurchase: false } }, P);
+  assert.equal(manual.serviceTenantKobo, 0);
+});
+
+test("service: each party's unpaid balance is collected from them after a switch", () => {
+  const q = quote({
+    ...BASE, feeBearer: 'tenant',
+    service: { ...SVC, payer: 'tenant_monthly', tenantDueKobo: 50000, ownerDueKobo: 10000 },
+  }, P);
+  assert.equal(q.serviceTenantKobo, 50000);
+  assert.equal(q.serviceOwnerKobo, 10000);
+  assert.equal(q.serviceKobo, 60000);
+});

@@ -234,7 +234,9 @@ test('unit price limits: owners edit, limits reach owners, impact is reported', 
   resetRateLimits();
   const view = await api.call('GET', '/v1/staff/settings/tariff', { token: editorToken });
   assert.equal(view.status, 200, view.text);
-  assert.deepEqual(view.body.defaults, { maxUnitPriceNaira: 250, baseUnitCostNaira: 209.5 });
+  assert.deepEqual(view.body.defaults, {
+    maxUnitPriceNaira: 250, baseUnitCostNaira: 209.5, gprsFeeSinglePhaseNaira: 0, gprsFeeThreePhaseNaira: 0, typicalDailyKwh: 5, // GPRS fees are 0 in tests (helpers.js)
+  });
   assert.equal(view.body.impact.priced, 1); // Ada priced at ₦230
 
   assert.equal((await api.call('PUT', '/v1/staff/settings/tariff', { token: editorToken, body: { maxUnitPriceNaira: 300, baseUnitCostNaira: 200 } })).status, 403);
@@ -255,7 +257,7 @@ test('unit price limits: owners edit, limits reach owners, impact is reported', 
   const login = await api.call('POST', '/v1/auth/landlord/login', { body: { identifier: 'ada@example.com', password: 'correct-horse' } });
   const owner = login.body.token;
   const me = await api.call('GET', '/v1/landlord/me', { token: owner });
-  assert.deepEqual(me.body.landlord.tariffLimits, { max: 300, baseCost: 200 });
+  assert.deepEqual(me.body.landlord.tariffLimits, { max: 300, baseCost: 200, gprsFeeSinglePhase: 0, gprsFeeThreePhase: 0 });
   assert.equal((await api.call('PUT', '/v1/landlord/tariff', { token: owner, body: { unitPrice: 280 } })).status, 200); // above the old ₦250 cap
   assert.equal((await api.call('PUT', '/v1/landlord/tariff', { token: owner, body: { unitPrice: 301 } })).status, 400);
   const floor = await api.call('PUT', '/v1/landlord/tariff', { token: owner, body: { unitPrice: 199 } });

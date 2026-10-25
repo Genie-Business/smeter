@@ -9,6 +9,19 @@ String naira(num? v, {bool whole = false}) => v == null ? '-' : (whole ? _nairaW
 String units(num? v) => v == null ? '-' : _num.format(v);
 String kwh(num? v) => v == null ? '-' : '${_num.format(v)} kWh';
 
+/// "4.3 days", "1 day"
+String days(num v) {
+  final n = v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+  return v == 1 ? '1 day' : '$n days';
+}
+
+/// Who pays a meter's GPRS service charge, for the owner's screens.
+const servicePayerLabels = {
+  'owner': 'I pay it',
+  'tenant_monthly': 'Tenant pays monthly',
+  'tenant_per_purchase': 'Tenant pays with each purchase',
+};
+
 DateTime? parseDate(String? s) => s == null ? null : DateTime.tryParse(s)?.toLocal();
 
 /// 11-06-2026, the format used across the designs.

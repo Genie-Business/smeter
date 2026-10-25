@@ -122,12 +122,21 @@ export const paymentSettingsDefaults = envDefaults;
 const tariffDefaults = () => ({
   maxUnitPriceNaira: config.tariff.maxUnitPriceNaira,
   baseUnitCostNaira: config.tariff.baseUnitCostNaira,
+  gprsFeeSinglePhaseNaira: config.tariff.gprsFeeSinglePhaseNaira,
+  gprsFeeThreePhaseNaira: config.tariff.gprsFeeThreePhaseNaira,
+  typicalDailyKwh: config.tariff.typicalDailyKwh,
 });
+
+const monthlyFee = (what) =>
+  z.coerce.number({ error: `Enter the ${what} service charge` }).min(0, 'The service charge can’t be negative').max(100_000, 'The service charge is too high');
 
 export const tariffSettingsSchema = z
   .object({
     maxUnitPriceNaira: z.coerce.number({ error: 'Enter the maximum price' }).positive('The maximum must be above ₦0').max(100_000, 'The maximum is too high'),
     baseUnitCostNaira: z.coerce.number({ error: 'Enter the utility cost' }).positive('The utility cost must be above ₦0').max(100_000, 'The utility cost is too high'),
+    gprsFeeSinglePhaseNaira: monthlyFee('single-phase'),
+    gprsFeeThreePhaseNaira: monthlyFee('three-phase'),
+    typicalDailyKwh: z.coerce.number({ error: 'Enter the typical daily use' }).positive('Typical daily use must be above 0 kWh').max(1000, 'Typical daily use is too high'),
   })
   .refine((s) => s.baseUnitCostNaira < s.maxUnitPriceNaira, {
     message: 'The utility cost must be below the maximum price, or owners can’t set any price',
@@ -162,7 +171,8 @@ export function tariffNow() {
 }
 
 export async function saveTariffSettings(input, staffId) {
-  const parsed = tariffSettingsSchema.safeParse(input);
+  // Fields left out keep their current values.
+  const parsed = tariffSettingsSchema.safeParse({ ...(await getTariffSettings({ fresh: true })), ...input });
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     throw badRequest(issue.message, { [issue.path.join('.') || 'settings']: issue.message });

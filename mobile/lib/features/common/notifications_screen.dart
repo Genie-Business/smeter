@@ -93,6 +93,7 @@ class _NotificationTile extends StatelessWidget {
       'meter_event' || 'relay' => (Icons.warning_amber_rounded, Tone.danger),
       'security' => (Icons.shield_outlined, Tone.info),
       'mode' => (Icons.swap_horiz_rounded, Tone.info),
+      'service' => (Icons.cell_tower_rounded, Tone.brand),
       'tariff' => (Icons.sell_outlined, Tone.brand),
       'tenant_joined' => (Icons.person_add_alt_rounded, Tone.success),
       _ => (Icons.notifications_none_rounded, Tone.brand),

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/app_content.dart';
 import '../../core/models.dart';
 import '../payments/buy_power_screen.dart';
+import '../payments/checkout.dart';
 import 'tenant_repository.dart';
 
 /// Open the Buy Power flow and refresh tenant data afterwards.
@@ -29,6 +30,15 @@ Future<void> openBuyPower(BuildContext context, WidgetRef ref, TenantProfile ten
       ),
     ),
   );
+  ref.invalidate(tenantDashboardProvider);
+  ref.invalidate(tenantPurchasesProvider);
+}
+
+/// Pay the meter's outstanding service charge, then refresh.
+Future<void> openPayServiceCharge(BuildContext context, WidgetRef ref, TenantProfile tenant) async {
+  final checkout = await ref.read(tenantRepositoryProvider).payServiceCharge();
+  if (!context.mounted) return;
+  await runCheckout(context, checkout, ref.read(tenantRepositoryProvider).purchase, deliveryMode: tenant.deliveryMode);
   ref.invalidate(tenantDashboardProvider);
   ref.invalidate(tenantPurchasesProvider);
 }

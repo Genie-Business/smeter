@@ -2,10 +2,12 @@
 //  - pending payments with no webhook after N minutes are verified directly
 //    with the gateway (the "audit alert" path);
 //  - paid purchases whose token generation failed are retried;
-//  - owner subaccounts made before product tagging get the smeter tag.
+//  - owner subaccounts made before product tagging get the smeter tag;
+//  - GPRS service charges are billed for each month that has started.
 import { db, now } from '../db.js';
 import { refreshGeni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
+import { accrueAll } from './service-charge.js';
 import { paymentParams } from './settings.js';
 import { settlePayment, vend } from './vending.js';
 
@@ -56,6 +58,8 @@ export async function sweepOnce() {
       console.error('[sweeper] subaccount tag failed', l.settlement_ref, err.message);
     }
   }
+
+  await accrueAll();
 }
 
 export function startSweeper(intervalMs = 60 * 1000) {

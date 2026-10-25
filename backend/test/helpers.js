@@ -9,6 +9,9 @@ process.env.EMAIL_PROVIDER = 'log';
 delete process.env.RESEND_API_KEY;
 process.env.OTP_DEBUG_ECHO = 'true';
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret';
+// No GPRS service charge unless a test sets one (see service-charge.test.js).
+process.env.GPRS_FEE_SINGLE_PHASE_NAIRA = '0';
+process.env.GPRS_FEE_THREE_PHASE_NAIRA = '0';
 
 const { createApp } = await import('../src/app.js');
 const { closeDb, resetDb } = await import('../src/db.js');

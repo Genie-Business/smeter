@@ -45,6 +45,14 @@ and types it into the meter remote. The head-end is never polled for that meter,
 and its "usage" is built from purchases. Owners choose the mode when adding a
 meter and can switch it later; the tenant is notified when they do.
 
+**GPRS service charge:** a GPRS meter has a monthly service charge for its network
+link (set on the admin Pricing page, single-phase and three-phase rates). For each
+meter the owner chooses who pays: *the owner* (billed monthly and deducted from their
+share of tenant purchases), *the tenant monthly* (paid in the app, or any unpaid
+months are added to their next purchase), or *the tenant with each purchase* (each
+purchase pays for the days its units should last, from the meter's average daily
+use). Logic in `backend/src/services/service-charge.js`; the sweeper bills new months.
+
 **Money split:** units are priced at the landlord's rate. The platform keeps the
 base utility cost (and the gateway fee when the tenant pays it); the landlord's
 Paystack subaccount gets the markup plus any recovered debt (minus the fee when the

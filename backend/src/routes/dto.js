@@ -1,3 +1,4 @@
+import { serviceDto } from '../services/service-charge.js';
 import { tariffNow } from '../services/settings.js';
 import { koboToNaira } from '../util/http.js';
 import { maskPhone } from '../util/phone.js';
@@ -26,6 +27,9 @@ export function landlordDto(l) {
     tariffLimits: {
       max: tariffNow().maxUnitPriceNaira,
       baseCost: tariffNow().baseUnitCostNaira,
+      // Monthly GPRS service charge per automatic-delivery meter.
+      gprsFeeSinglePhase: tariffNow().gprsFeeSinglePhaseNaira,
+      gprsFeeThreePhase: tariffNow().gprsFeeThreePhaseNaira,
     },
   };
 }
@@ -47,6 +51,7 @@ export function meterDto(m) {
     debtRecoveryPercent: m.debt_recovery_percent,
     relayState: m.relay_state,
     deliveryMode: m.delivery_mode,
+    service: serviceDto(m, { forOwner: true }),
     createdAt: m.created_at,
   };
 }
@@ -65,6 +70,7 @@ export function tenantDto(m, landlord) {
     debtRecoveryPercent: m.debt_recovery_percent,
     relayState: m.relay_state,
     deliveryMode: m.delivery_mode,
+    service: serviceDto(m),
     landlord: landlord
       ? { name: landlord.full_name, phone: landlord.phone }
       : null,

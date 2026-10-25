@@ -10,6 +10,7 @@ import { payments } from '../providers/payments.js';
 import { codeEmail, inviteEmail, maskEmail, sendEmail } from '../providers/email.js';
 import { listNotifications, markAllRead, notify, unreadCount } from '../services/notifications.js';
 import { getGeniSettings, getTariffSettings } from '../services/settings.js';
+import { billedUntilAfterChange, SERVICE_PAYERS } from '../services/service-charge.js';
 import { liveReading } from '../services/usage.js';
 import { createPurchase, getPurchase, landlordPurchaseDto, settlePayment, vend } from '../services/vending.js';
 import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
@@ -289,6 +290,8 @@ const meterBody = z.object({
   debtAmount: z.coerce.number().min(0).max(10_000_000).optional().default(0),
   debtRecoveryPercent: z.coerce.number().min(0).max(100).optional().default(0),
   deliveryMode: z.enum(['ota', 'manual']).optional().default('ota'),
+  // Who pays the GPRS service charge (automatic delivery only).
+  servicePayer: z.enum(SERVICE_PAYERS).optional().default('owner'),
 });
 
 landlordRoutes.post('/meters', async (req, res) => {
@@ -329,14 +332,15 @@ landlordRoutes.post('/meters', async (req, res) => {
   const values = [
     req.landlord.id, body.address, body.apartment, body.tenantFirstName ?? null, body.tenantLastName ?? null,
     tenantPhone, info.isThreePhase ? 1 : 0, customerId, nairaToKobo(body.debtAmount), body.debtRecoveryPercent,
-    body.deliveryMode, body.tenantEmail,
+    body.deliveryMode, body.tenantEmail, body.servicePayer,
   ];
   if (existing) {
     // Only re-claim a meter that is still removed (another owner may have raced us).
     const r = await db().run(
       `UPDATE meters SET landlord_id = ?, address = ?, apartment = ?, tenant_first_name = ?, tenant_last_name = ?,
          tenant_phone = ?, is_three_phase = ?, customer_id = ?, debt_kobo = ?, debt_recovery_percent = ?,
-         delivery_mode = ?, tenant_email = ?, status = 'invited', accepted_at = NULL, relay_state = 'connected'
+         delivery_mode = ?, tenant_email = ?, service_payer = ?, status = 'invited', accepted_at = NULL,
+         relay_state = 'connected', service_due_kobo = 0, service_owner_due_kobo = 0, service_billed_until = NULL
        WHERE meter_id = ? AND status = 'removed'`,
       ...values, body.meterId,
     );
@@ -345,8 +349,8 @@ landlordRoutes.post('/meters', async (req, res) => {
     try {
       await db().run(
         `INSERT INTO meters (landlord_id, address, apartment, tenant_first_name, tenant_last_name, tenant_phone,
-           is_three_phase, customer_id, debt_kobo, debt_recovery_percent, delivery_mode, tenant_email, meter_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           is_three_phase, customer_id, debt_kobo, debt_recovery_percent, delivery_mode, tenant_email, service_payer, meter_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ...values, body.meterId,
       );
     } catch (err) {
@@ -383,6 +387,7 @@ landlordRoutes.patch('/meters/:meterId', async (req, res) => {
       debtAmount: z.coerce.number().min(0).max(10_000_000).optional(),
       debtRecoveryPercent: z.coerce.number().min(0).max(100).optional(),
       deliveryMode: z.enum(['ota', 'manual']).optional(),
+      servicePayer: z.enum(SERVICE_PAYERS).optional(),
       tenantEmail: z.string().trim().toLowerCase().email("Enter the tenant's email address").optional(),
     }),
     req.body,
@@ -390,7 +395,8 @@ landlordRoutes.patch('/meters/:meterId', async (req, res) => {
   await db().run(
     `UPDATE meters SET address = COALESCE(?, address), apartment = COALESCE(?, apartment),
        debt_kobo = COALESCE(?, debt_kobo), debt_recovery_percent = COALESCE(?, debt_recovery_percent),
-       delivery_mode = COALESCE(?, delivery_mode), tenant_email = COALESCE(?, tenant_email)
+       delivery_mode = COALESCE(?, delivery_mode), tenant_email = COALESCE(?, tenant_email),
+       service_payer = COALESCE(?, service_payer), service_billed_until = ?
      WHERE id = ?`,
     body.address ?? null,
     body.apartment ?? null,
@@ -398,8 +404,21 @@ landlordRoutes.patch('/meters/:meterId', async (req, res) => {
     body.debtRecoveryPercent ?? null,
     body.deliveryMode ?? null,
     body.tenantEmail ?? null,
+    body.servicePayer ?? null,
+    billedUntilAfterChange(meter, body),
     meter.id,
   );
+  if (body.servicePayer && body.servicePayer !== meter.service_payer) {
+    await notify({
+      recipientType: 'tenant', recipientId: meter.meter_id, kind: 'service',
+      title: 'Service charge updated',
+      body: {
+        owner: 'Your property owner now pays the meter service charge.',
+        tenant_monthly: 'You now pay the meter service charge monthly. Pay it from Home, or it is added to your next purchase.',
+        tenant_per_purchase: 'The meter service charge is now added to each purchase, based on how long the units should last.',
+      }[body.servicePayer],
+    });
+  }
   if (body.deliveryMode && body.deliveryMode !== meter.delivery_mode) {
     await notify({
       recipientType: 'tenant', recipientId: meter.meter_id, kind: 'mode',
@@ -557,6 +576,8 @@ export function quoteDto(q) {
     units: q.units,
     fee: koboToNaira(q.feeKobo),
     feeBearer: q.feeBearer,
+    serviceCharge: koboToNaira(q.serviceTenantKobo ?? 0), // added on top for the buyer
+    serviceDays: q.serviceDays ?? 0,
     total: koboToNaira(q.totalKobo),
   };
 }

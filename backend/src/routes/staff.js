@@ -358,7 +358,7 @@ staffRoutes.get('/settings/tariff', async (_req, res) => {
 
 // ?preview: report the impact of unsaved values without saving.
 staffRoutes.post('/settings/tariff/preview', async (req, res) => {
-  const parsed = tariffSettingsSchema.safeParse(req.body ?? {});
+  const parsed = tariffSettingsSchema.safeParse({ ...(await getTariffSettings({ fresh: true })), ...(req.body ?? {}) });
   if (!parsed.success) throw badRequest(parsed.error.issues[0].message);
   res.json({ impact: await tariffImpact(parsed.data) });
 });

@@ -203,7 +203,14 @@ class LandlordTransactionRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final p = purchase;
-    final earn = p.landlordNet != null && p.status == 'vended' ? 'you earn ${naira(p.landlordNet)}' : null;
+    final earn = p.isService
+        ? 'service charge'
+        : p.landlordNet != null && p.status == 'vended'
+            ? [
+                'you earn ${naira(p.landlordNet)}',
+                if (p.ownerServiceCharge > 0) '${naira(p.ownerServiceCharge)} service charge',
+              ].join(', ')
+            : null;
     return PurchaseRow(
       purchase: p,
       showToken: false,

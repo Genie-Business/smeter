@@ -168,6 +168,18 @@ class ReceiptBody extends StatelessWidget {
     final p = purchase;
     final manualDelivery = p.delivery == 'manual';
     final (icon, tone, title, message) = switch (p.status) {
+      'vended' when p.isService => (
+          Icons.cell_tower_rounded,
+          Tone.success,
+          'Service charge paid',
+          'Thanks. Your meter stays connected for automatic delivery.'
+        ),
+      'paid' || 'vending' when p.isService => (
+          Icons.autorenew_rounded,
+          Tone.info,
+          'Recording your payment',
+          'Payment received. This takes a few seconds.'
+        ),
       'vended' when manualDelivery => (
           Icons.vpn_key_rounded,
           Tone.success,
@@ -227,7 +239,9 @@ class ReceiptBody extends StatelessWidget {
       ),
       const SizedBox(height: Space.xl),
       Text(naira(p.amount), textAlign: TextAlign.center, style: SmeterText.display()),
-      if (p.units != null)
+      if (p.isService)
+        Text('Meter service charge', textAlign: TextAlign.center, style: SmeterText.title3(color: SmeterColors.success))
+      else if (p.units != null)
         Text('${units(p.units)} kWh', textAlign: TextAlign.center, style: SmeterText.title3(color: SmeterColors.success)),
       if (p.token != null) ...[
         const SizedBox(height: Space.xl),
@@ -249,9 +263,14 @@ class ReceiptBody extends StatelessWidget {
       const SectionHeader('Details'),
       AppCard(
         child: Column(children: [
-          KeyValueRow('Unit price', naira(p.unitPrice)),
+          if (!p.isService) KeyValueRow('Unit price', naira(p.unitPrice)),
           if (p.debtRecovered > 0) KeyValueRow('Debt recovered', naira(p.debtRecovered)),
-          if (p.fee > 0 && p.feeBearer == 'tenant') KeyValueRow('Service fee', naira(p.fee)),
+          if (p.serviceCharge > 0 && !p.isService)
+            KeyValueRow(
+              p.serviceDays > 0 ? 'Meter service (${days(p.serviceDays)})' : 'Meter service charge',
+              naira(p.serviceCharge),
+            ),
+          if (p.fee > 0 && p.feeBearer == 'tenant') KeyValueRow('Payment fee', naira(p.fee)),
           KeyValueRow('Total paid', naira(p.total)),
           KeyValueRow('Date', dateTime(p.vendedAt ?? p.createdAt)),
           if (address != null) KeyValueRow('Address', address!),

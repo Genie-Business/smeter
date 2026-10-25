@@ -64,6 +64,19 @@ ALTER TABLE landlords ADD COLUMN IF NOT EXISTS payout_schedule TEXT NOT NULL DEF
 -- Whether the subaccount carries the smeter product tag (older ones are tagged by the sweeper).
 ALTER TABLE landlords ADD COLUMN IF NOT EXISTS settlement_tagged BOOLEAN NOT NULL DEFAULT false;
 
+-- GPRS service charge (keeps an automatic-delivery meter online). service_billed_until
+-- is the date the charge has been billed through; unpaid monthly charges build up
+-- in service_due_kobo (tenant's) or service_owner_due_kobo (owner's) and are
+-- collected from whoever owes them at the next purchase.
+--   owner:               deducted from the owner's share of tenant purchases
+--   tenant_monthly:      the tenant pays monthly (or it's added to the next purchase)
+--   tenant_per_purchase: each purchase pays for the days its units should last
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_payer TEXT NOT NULL DEFAULT 'owner'
+  CHECK (service_payer IN ('owner','tenant_monthly','tenant_per_purchase'));
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_due_kobo BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_owner_due_kobo BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_billed_until TEXT;
+
 CREATE TABLE IF NOT EXISTS purchases (
   ${ID},
   reference          TEXT NOT NULL UNIQUE,         -- unique per payment attempt
@@ -98,6 +111,11 @@ CREATE TABLE IF NOT EXISTS purchases (
 CREATE INDEX IF NOT EXISTS purchases_meter ON purchases(meter_id, created_at);
 CREATE INDEX IF NOT EXISTS purchases_landlord ON purchases(landlord_id, created_at);
 CREATE INDEX IF NOT EXISTS purchases_status ON purchases(status, created_at);
+-- kind 'service': a tenant paying the GPRS service charge on its own (no units).
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'units' CHECK (kind IN ('units','service'));
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS service_kobo BIGINT NOT NULL DEFAULT 0;        -- service charge collected
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS service_owner_kobo BIGINT NOT NULL DEFAULT 0;  -- part of it taken from the owner's share
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS service_days DOUBLE PRECISION NOT NULL DEFAULT 0; -- days billed ahead (per purchase)
 
 CREATE TABLE IF NOT EXISTS otps (
   ${ID},

@@ -52,6 +52,10 @@ class TenantRepository {
   Future<Checkout> buy(double amount, {String? channel}) async =>
       Checkout.fromJson(await _api.post('/v1/tenant/purchases', {'amount': amount, 'channel': ?channel}));
 
+  /// Pay the outstanding GPRS service charge on its own.
+  Future<Checkout> payServiceCharge({String? channel}) async =>
+      Checkout.fromJson(await _api.post('/v1/tenant/service-charge', {'channel': ?channel}));
+
   Future<List<Purchase>> purchases({int page = 1}) async {
     final r = await _api.get('/v1/tenant/purchases', query: {'page': page, 'pageSize': 50});
     return (r['data'] as List).map((p) => Purchase.fromJson(Map<String, dynamic>.from(p as Map))).toList();

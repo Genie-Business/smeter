@@ -249,8 +249,13 @@ class _BuyPowerScreenState extends State<BuyPowerScreen> {
             if (q != null && q.debtRecovered > 0)
               KeyValueRow('Debt recovery', '− ${naira(q.debtRecovered)}', valueColor: SmeterColors.warn),
             if (q != null) KeyValueRow('Power', naira(q.energyAmount)),
+            if (q != null && q.serviceCharge > 0)
+              KeyValueRow(
+                q.serviceDays > 0 ? 'Meter service (${days(q.serviceDays)})' : 'Meter service charge',
+                naira(q.serviceCharge),
+              ),
             if (q != null)
-              KeyValueRow('Service fee', q.feeBearer == 'tenant' ? naira(q.fee) : 'Paid by owner'),
+              KeyValueRow('Payment fee', q.feeBearer == 'tenant' ? naira(q.fee) : 'Paid by owner'),
             KeyValueRow('Price per kWh', naira(widget.unitPrice)),
             const SizedBox(height: Space.xs),
             const Divider(),

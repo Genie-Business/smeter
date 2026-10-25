@@ -164,25 +164,32 @@ class _MeterCardRow extends StatelessWidget {
   }
 }
 
-// Delivery mode picker
-class DeliveryModePicker extends StatelessWidget {
-  const DeliveryModePicker({super.key, required this.value, required this.onChanged});
+/// One option in a single-choice list of cards.
+class ChoiceTile extends StatelessWidget {
+  const ChoiceTile({
+    super.key,
+    required this.selected,
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.onTap,
+  });
 
-  final String value;
-  final ValueChanged<String> onChanged;
+  final bool selected;
+  final IconData icon;
+  final String title;
+  final String body;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
-    Widget option(String id, IconData icon, String title, String body) {
-      final selected = value == id;
-      return Semantics(
+  Widget build(BuildContext context) => Semantics(
         selected: selected,
         inMutuallyExclusiveGroup: true,
         button: true,
         child: InkWell(
           onTap: () {
             HapticFeedback.selectionClick();
-            onChanged(id);
+            onTap();
           },
           borderRadius: BorderRadius.circular(Radii.md),
           child: AnimatedContainer(
@@ -209,16 +216,83 @@ class DeliveryModePicker extends StatelessWidget {
           ),
         ),
       );
-    }
+}
 
-    return Column(children: [
-      option('ota', Icons.cell_tower_rounded, 'Automatic (GPRS)',
-          'Units are sent to the meter over the network. Enables live readings, usage and remote disconnect.'),
-      const SizedBox(height: Space.sm),
-      option('manual', Icons.dialpad_rounded, 'Manual token',
-          'No network link. The tenant gets a token after each purchase and types it into the meter remote.'),
-    ]);
+// Delivery mode picker
+class DeliveryModePicker extends StatelessWidget {
+  const DeliveryModePicker({super.key, required this.value, required this.onChanged});
+
+  final String value;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(children: [
+        ChoiceTile(
+          selected: value == 'ota',
+          icon: Icons.cell_tower_rounded,
+          title: 'Automatic (GPRS)',
+          body: 'Units are sent to the meter over the network. Enables live readings, usage and remote disconnect. '
+              'Has a monthly service charge for the network link.',
+          onTap: () => onChanged('ota'),
+        ),
+        const SizedBox(height: Space.sm),
+        ChoiceTile(
+          selected: value == 'manual',
+          icon: Icons.dialpad_rounded,
+          title: 'Manual token',
+          body: 'No network link. The tenant gets a token after each purchase and types it into the meter remote.',
+          onTap: () => onChanged('manual'),
+        ),
+      ]);
+}
+
+// Who pays the GPRS service charge
+class ServicePayerPicker extends StatelessWidget {
+  const ServicePayerPicker({super.key, required this.value, required this.feeText, required this.onChanged});
+
+  final String value;
+
+  /// e.g. "₦1,500 a month"
+  final String feeText;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('The GPRS service charge ($feeText) keeps the meter online.', style: SmeterText.small()),
+        const SizedBox(height: Space.md),
+        ChoiceTile(
+          selected: value == 'owner',
+          icon: Icons.home_work_outlined,
+          title: servicePayerLabels['owner']!,
+          body: "Deducted from your share of your tenant's power purchases. Your tenant pays nothing extra.",
+          onTap: () => onChanged('owner'),
+        ),
+        const SizedBox(height: Space.sm),
+        ChoiceTile(
+          selected: value == 'tenant_monthly',
+          icon: Icons.calendar_month_outlined,
+          title: servicePayerLabels['tenant_monthly']!,
+          body: "Your tenant pays it each month in the app. If they don't, it is added to their next purchase.",
+          onTap: () => onChanged('tenant_monthly'),
+        ),
+        const SizedBox(height: Space.sm),
+        ChoiceTile(
+          selected: value == 'tenant_per_purchase',
+          icon: Icons.bolt_rounded,
+          title: servicePayerLabels['tenant_per_purchase']!,
+          body: "Each purchase includes the service charge for the days its units should last, based on the meter's usage.",
+          onTap: () => onChanged('tenant_per_purchase'),
+        ),
+      ]);
+}
+
+/// "₦1,500 a month", or both rates while the meter's phase isn't known yet.
+String _feeText(Landlord? l, bool? threePhase) {
+  if (l == null) return 'a monthly fee';
+  if (threePhase == null && l.gprsFeeThreePhase != l.gprsFeeSinglePhase) {
+    return '${naira(l.gprsFeeSinglePhase, whole: true)} a month, ${naira(l.gprsFeeThreePhase, whole: true)} for three-phase';
   }
+  return '${naira(threePhase == true ? l.gprsFeeThreePhase : l.gprsFeeSinglePhase, whole: true)} a month';
 }
 
 // Add
@@ -241,6 +315,7 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
   final _debt = TextEditingController();
   final _percent = TextEditingController(text: '10');
   String _mode = 'ota';
+  String _servicePayer = 'owner';
   bool _recoverDebt = false;
   MeterCheck? _check;
   String? _checkedId;
@@ -288,6 +363,7 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
         'tenantPhone': _phone.text.trim(),
         'tenantEmail': _email.text.trim(),
         'deliveryMode': _mode,
+        if (_mode == 'ota') 'servicePayer': _servicePayer,
         if (_first.text.trim().isNotEmpty) 'tenantFirstName': _first.text.trim(),
         if (_last.text.trim().isNotEmpty) 'tenantLastName': _last.text.trim(),
         if (_recoverDebt) 'debtAmount': double.tryParse(_debt.text) ?? 0,
@@ -364,6 +440,17 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
             padding: const EdgeInsets.symmetric(horizontal: Space.lg),
             child: DeliveryModePicker(value: _mode, onChanged: (v) => setState(() => _mode = v)),
           ),
+          if (_mode == 'ota') ...[
+            const SectionHeader('Who pays the service charge?'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+              child: ServicePayerPicker(
+                value: _servicePayer,
+                feeText: _feeText(ref.watch(landlordProfileProvider).value, _check?.threePhase),
+                onChanged: (v) => setState(() => _servicePayer = v),
+              ),
+            ),
+          ],
           const SectionHeader('Tenant'),
           AppCard(
             child: Column(children: [
@@ -537,6 +624,28 @@ class MeterDetailScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: Space.lg),
               child: DeliveryModePicker(value: m.deliveryMode, onChanged: (v) => _changeMode(context, ref, m, v)),
             ),
+            if (m.service != null && (!m.isManual || m.service!.due > 0 || m.service!.ownerDue > 0)) ...[
+              const SectionHeader('GPRS service charge'),
+              if (!m.isManual)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+                  child: ServicePayerPicker(
+                    value: m.service!.payer,
+                    feeText: '${naira(m.service!.monthlyFee, whole: true)} a month',
+                    onChanged: (v) => _changePayer(context, ref, m, v),
+                  ),
+                ),
+              AppCard(
+                child: Column(children: [
+                  KeyValueRow('Monthly charge', naira(m.service!.monthlyFee)),
+                  KeyValueRow('You owe', naira(m.service!.ownerDue),
+                      valueColor: m.service!.ownerDue > 0 ? SmeterColors.warn : null),
+                  KeyValueRow('Tenant owes', naira(m.service!.due),
+                      valueColor: m.service!.due > 0 ? SmeterColors.warn : null),
+                  if (m.service!.billedUntil != null) KeyValueRow('Covered until', shortDate(m.service!.billedUntil)),
+                ]),
+              ),
+            ],
             if (!m.isManual) ...[
               const SectionHeader('Meter link'),
               AppCard(
@@ -649,6 +758,30 @@ class MeterDetailScreen extends ConsumerWidget {
       await ref.read(landlordRepositoryProvider).updateMeter(m.meterId, {'deliveryMode': mode});
       ref.invalidate(meterDetailProvider(m.meterId));
       ref.invalidate(metersProvider);
+      if (context.mounted) showInfo(context, 'Updated. We let your tenant know.');
+    } catch (e) {
+      if (context.mounted) showError(context, e);
+    }
+  }
+
+  Future<void> _changePayer(BuildContext context, WidgetRef ref, Meter m, String payer) async {
+    if (payer == m.service?.payer) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Change who pays?'),
+        content: Text('${servicePayerLabels[payer]}. Anything already owed stays with whoever owes it now. '
+            "We'll let your tenant know."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Change')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref.read(landlordRepositoryProvider).updateMeter(m.meterId, {'servicePayer': payer});
+      ref.invalidate(meterDetailProvider(m.meterId));
       if (context.mounted) showInfo(context, 'Updated. We let your tenant know.');
     } catch (e) {
       if (context.mounted) showError(context, e);
