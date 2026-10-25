@@ -8,13 +8,11 @@ meter.
 ```
 smeter/
 ├── backend/   Node.js (plain JavaScript, Express 5) API — owns users, payments, pricing, content
+├── mobile/    Flutter app (Android + iOS) — tenant and property-owner experiences
 ├── website/   4-page marketing site (static HTML/CSS/JS, no build) — drives app downloads
 │   └── admin/ Admin dashboard for the smeter team, served at /admin — content + operations
 └── docs/      Geni head-end API collection (sanitised — no tokens/passwords)
 ```
-
-The Flutter mobile app (tenant and property-owner experiences) is kept in a separate
-repository; this repo holds the API, the website and the admin dashboard.
 
 The app never talks to the meter head-end directly. The backend holds the Geni
 (Calin) credentials and the token-vending authorization password, and exposes a
@@ -128,6 +126,18 @@ With no credentials set, everything runs against mocks:
 - **Mock head-end:** any 6–20-digit meter number exists, except numbers starting `000`. Numbers ending in `9` report offline, which exercises the manual-token path.
 - **Mock checkout:** served at `/pay/mock/:reference`.
 - **Login codes and emails:** printed to the server log (no `RESEND_API_KEY`), and codes are returned as `devCode` in development. Staging can opt in with `OTP_DEBUG_ECHO=true`. Never in production.
+
+### Mobile
+
+```bash
+cd mobile
+flutter pub get
+flutter run                                                   # hosted API (https://api.smeter.app)
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080   # Android emulator → your machine
+```
+
+Cleartext HTTP is allowed only to `10.0.2.2`/`localhost`
+(`android/app/src/main/res/xml/network_security_config.xml`).
 
 ## Domains
 
