@@ -293,6 +293,21 @@ test('Paystack metadata is tagged as smeter for the shared company account', asy
   ]);
 });
 
+test('sweeper tags owner subaccounts created before tagging', async () => {
+  const { payments } = await import('../src/providers/payments.js');
+  const l = await db().get('SELECT id, settlement_ref FROM landlords WHERE settlement_ref IS NOT NULL LIMIT 1');
+  assert.ok(l, 'an owner with a payout account exists by now');
+  await db().run('UPDATE landlords SET settlement_tagged = false WHERE id = ?', l.id);
+  payments().tagged.clear();
+  await sweepOnce();
+  assert.ok(payments().tagged.has(l.settlement_ref));
+  const after = await db().get('SELECT settlement_tagged FROM landlords WHERE id = ?', l.id);
+  assert.equal(after.settlement_tagged, true);
+  payments().tagged.clear();
+  await sweepOnce(); // already tagged: not touched again
+  assert.equal(payments().tagged.size, 0);
+});
+
 test('roles are enforced', async () => {
   const a = await api.call('GET', '/v1/landlord/dashboard', { token: tenantToken });
   assert.equal(a.status, 403);

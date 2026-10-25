@@ -211,7 +211,7 @@ landlordRoutes.post('/bank/confirm', async (req, res) => {
   }
   await db().run(
     `UPDATE landlords SET bank_name = ?, bank_code = ?, account_number = ?, account_name = ?,
-       bank_verified_at = ?, settlement_ref = ? WHERE id = ?`,
+       bank_verified_at = ?, settlement_ref = ?, settlement_tagged = true WHERE id = ?`,
     pending.bankName, pending.bankCode, pending.accountNumber, pending.accountName, now(), settlementRef, req.landlord.id,
   );
   await notify({

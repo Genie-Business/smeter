@@ -61,6 +61,8 @@ CREATE INDEX IF NOT EXISTS meters_landlord ON meters(landlord_id);
 -- How often an owner's share is paid out (Paystack subaccount settlement schedule).
 ALTER TABLE landlords ADD COLUMN IF NOT EXISTS payout_schedule TEXT NOT NULL DEFAULT 'daily'
   CHECK (payout_schedule IN ('daily','weekly','monthly'));
+-- Whether the subaccount carries the smeter product tag (older ones are tagged by the sweeper).
+ALTER TABLE landlords ADD COLUMN IF NOT EXISTS settlement_tagged BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS purchases (
   ${ID},

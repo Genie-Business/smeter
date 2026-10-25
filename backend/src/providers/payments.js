@@ -11,6 +11,11 @@ export const PAYSTACK_SCHEDULE = { daily: 'auto', weekly: 'weekly', monthly: 'mo
 // transaction and subaccount smeter creates carries this tag.
 export const PRODUCT_TAG = 'smeter';
 
+const SUBACCOUNT_TAG = {
+  description: `${PRODUCT_TAG} property owner payouts`,
+  metadata: JSON.stringify({ product: PRODUCT_TAG }),
+};
+
 /** Metadata with the product tag, plus custom_fields so the Paystack dashboard shows it. */
 export function taggedMetadata(metadata = {}) {
   const field = (display_name, variable_name, value) => ({ display_name, variable_name, value: String(value) });
@@ -100,10 +105,14 @@ class PaystackPayments {
       account_number: accountNumber,
       percentage_charge: 0, // per-transaction split is set via transaction_charge
       settlement_schedule: PAYSTACK_SCHEDULE[schedule],
-      description: `${PRODUCT_TAG} property owner payouts`,
-      metadata: JSON.stringify({ product: PRODUCT_TAG }),
+      ...SUBACCOUNT_TAG,
     });
     return { settlementRef: data.subaccount_code };
+  }
+
+  /** Add the product tag to a subaccount created before tagging existed. */
+  async tagSettlementAccount(settlementRef) {
+    await this.call('PUT', `/subaccount/${encodeURIComponent(settlementRef)}`, SUBACCOUNT_TAG);
   }
 
   /** How often Paystack pays this owner's share out. */
@@ -176,6 +185,12 @@ class MockPayments {
 
   async setSettlementSchedule(settlementRef, schedule) {
     this.schedules.set(settlementRef, schedule);
+  }
+
+  tagged = new Set();
+
+  async tagSettlementAccount(settlementRef) {
+    this.tagged.add(settlementRef);
   }
 }
 

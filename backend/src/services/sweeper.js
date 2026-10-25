@@ -1,9 +1,11 @@
 // Background reconciliation:
 //  - pending payments with no webhook after N minutes are verified directly
 //    with the gateway (the "audit alert" path);
-//  - paid purchases whose token generation failed are retried.
+//  - paid purchases whose token generation failed are retried;
+//  - owner subaccounts made before product tagging get the smeter tag.
 import { db, now } from '../db.js';
 import { refreshGeni } from '../geni/index.js';
+import { payments } from '../providers/payments.js';
 import { paymentParams } from './settings.js';
 import { settlePayment, vend } from './vending.js';
 
@@ -40,6 +42,18 @@ export async function sweepOnce() {
       await vend(p.reference);
     } catch (err) {
       console.error('[sweeper] vend retry failed', p.reference, err.message);
+    }
+  }
+
+  const untagged = await db().all(
+    'SELECT id, settlement_ref FROM landlords WHERE settlement_ref IS NOT NULL AND NOT settlement_tagged ORDER BY id LIMIT 20',
+  );
+  for (const l of untagged) {
+    try {
+      await payments().tagSettlementAccount(l.settlement_ref);
+      await db().run('UPDATE landlords SET settlement_tagged = true WHERE id = ?', l.id);
+    } catch (err) {
+      console.error('[sweeper] subaccount tag failed', l.settlement_ref, err.message);
     }
   }
 }
