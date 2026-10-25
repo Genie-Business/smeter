@@ -78,7 +78,7 @@ payPages.get('/return', async (req, res) => {
   res
     .type('html')
     .send(page('smeter payment', `<span class="tag">smeter</span>
-      <h1>${ok ? 'Payment received' : status === 'failed' ? 'Payment not completed' : 'Confirming payment…'}</h1>
+      <h1>${ok ? 'Payment received' : status === 'failed' ? 'Payment not completed' : 'Confirming payment...'}</h1>
       <p>${ok ? 'Your units are being sent to your meter.' : 'You can return to the app to check the status.'}</p>
       <a class="btn go" href="${esc(appLink(reference))}">Return to smeter</a>
       <script>setTimeout(function(){location.href=${JSON.stringify(appLink(reference))}},800)</script>`));

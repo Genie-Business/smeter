@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS notify_requests (
 const INT8 = 20;
 const NUMERIC = 1700;
 
-/** `?` placeholders → `$1, $2…` (ignores ? inside quoted strings). */
+/** `?` placeholders to `$1, $2...` (ignores ? inside quoted strings). */
 export function toPg(sql) {
   let n = 0;
   let out = '';

@@ -140,7 +140,7 @@ tenantRoutes.get('/purchases/:reference', async (req, res) => {
 
 tenantRoutes.get('/notifications', async (req, res) => {
   const local = await listNotifications('tenant', req.meter.meter_id);
-  // Meter-side events (tamper, low credit, relay…) from the head-end.
+  // Meter-side events (tamper, low credit, relay and so on) from the head-end.
   let events = [];
   try {
     const raw = await geni().events({

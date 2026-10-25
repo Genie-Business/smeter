@@ -187,7 +187,7 @@ export async function usageReport(meter, unitPriceKobo, period = 'month', anchor
     previousTotalKwh: before.total,
     projectedNextKwh: projectedNext,
     unitPrice: price,
-    note: 'The data you see may be 24–36 hours old. Readings arrive from the meter network on a delay.',
+    note: 'The data you see may be 24 to 36 hours old. Readings arrive from the meter network on a delay.',
   };
 }
 

@@ -1,7 +1,8 @@
 // Purchase lifecycle:
-//   pending ──payment verified──▶ paid ──token minted──▶ vended
-//      │                           │ (head-end failure: stays paid, retried by the sweeper)
-//      └──payment failed──▶ failed  └──────────────────▶ …
+//   pending -> paid      when the payment is verified
+//   paid    -> vended    when the token is minted (a head-end failure leaves it
+//                        paid, and the sweeper retries)
+//   pending -> failed    when the payment fails
 // Every transition is a conditional UPDATE on the current status, so duplicate
 // webhooks, the redirect callback and the sweeper can race safely (idempotent).
 import { randomBytes } from 'node:crypto';

@@ -236,7 +236,7 @@ const geniEnvDefaults = () => ({
 });
 
 /** Prefix of owner tariff ids on the head-end; short so the id stays well inside its length limit. */
-const TARIFF_PREFIX = z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/, 'Tariff prefix must be 1–8 letters or digits').transform((p) => p.toUpperCase());
+const TARIFF_PREFIX = z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/, 'Tariff prefix must be 1 to 8 letters or digits').transform((p) => p.toUpperCase());
 
 export const geniSettingsSchema = z.object({
   mode: z.enum(['live', 'mock']),
