@@ -204,7 +204,11 @@ export class GeniClient {
 
   async onlineStatus(meterId) {
     const result = await this.raw('/API/GPRSOnlineStatus/View', this.base({ meterId }));
-    const row = (Array.isArray(result) ? result : [result]).find((r) => r && String(r.meterId) === String(meterId));
+    // The head-end returns the meter's connect/disconnect history; the latest row is the current state.
+    const stamp = (r) => Date.parse(String(r.statusUpdateDate ?? '').replace(' ', 'T')) || 0;
+    const row = (Array.isArray(result) ? result : [result])
+      .filter((r) => r && String(r.meterId) === String(meterId))
+      .sort((a, b) => stamp(b) - stamp(a))[0];
     if (!row) return { online: false, lastSeen: null };
     const online = row.isOnline === true || row.isOnline === 'true' || row.isOnline === 1;
     return { online, lastSeen: row.statusUpdateDate ?? null };

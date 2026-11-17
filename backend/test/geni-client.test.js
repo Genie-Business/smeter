@@ -44,3 +44,19 @@ test('a failed or empty record lookup does not fail the vend', async () => {
   const broken = await vend(client({ receiptId: 0, token: '12345678901234567890' }, new Error('x')));
   assert.equal(broken.token, '12345678901234567890');
 });
+
+test('onlineStatus uses the latest history row whatever the order', async () => {
+  const rows = (list) => new GeniClient(cfg, async (url) => {
+    const result = new URL(url).pathname === '/API/User/Login' ? { token: 'x' } : list;
+    return new Response(JSON.stringify({ code: 0, result }), { status: 200 });
+  });
+  const hist = [
+    { meterId: '473', isOnline: false, statusUpdateDate: '2026-11-17 12:36:20' },
+    { meterId: '473', isOnline: true, statusUpdateDate: '2026-11-17 17:08:54' },
+    { meterId: '999', isOnline: false, statusUpdateDate: '2026-11-17 18:00:00' },
+    { meterId: '473', isOnline: false, statusUpdateDate: '2026-10-13 13:46:31' },
+  ];
+  assert.deepEqual(await rows(hist).onlineStatus('473'), { online: true, lastSeen: '2026-11-17 17:08:54' });
+  assert.equal((await rows([...hist].reverse()).onlineStatus('473')).online, true);
+  assert.equal((await rows([]).onlineStatus('473')).online, false);
+});
