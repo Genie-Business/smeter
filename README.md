@@ -68,7 +68,7 @@ landlord chooses to bear it). The ledger screen shows this per meter.
 | SM-VEN-001 One-tap purchase, OTA delivery, offline fallback token | `services/vending.js` |
 | SM-MON-001 Virtual display (volts/amps/load, 5 s refresh, "last seen") | `GET /v1/tenant/live`, Live display card |
 | SM-FIN-001 Price per kWh with regulatory cap | `PUT /v1/landlord/tariff`, Set Unit Price |
-| SM-ADM-001 Remote kill-switch (queued when offline) | `/meters/:id/disconnect|reconnect` |
+| SM-ADM-001 Remote kill-switch (pending until the head-end confirms) | `/meters/:id/disconnect|reconnect`, `services/meter-sync.js` |
 | SM-SUP-001 Support tickets routed to finance/technical | `routes/support.js`, Help & support |
 | SM-PAY-001/002/004 Multi-channel checkout, webhook verification, fee bearer toggle | `providers/payments.js`, `routes/payments.js` |
 | Debt recovery %, profit/markup ledger, tariff visibility | `services/pricing.js`, Ledger screen, Buy Power breakdown |
@@ -191,16 +191,32 @@ Paystack webhook settle payments as they happen either way.
 | `GENI_USER_ID`, `GENI_PASSWORD`, `GENI_COMPANY` | Head-end login (`/API/User/Login`) |
 | `GENI_TARIFF_PREFIX` | Prefix of owner tariff ids on the head-end (default `SML`); give each environment sharing a head-end its own |
 | `GENI_AUTHORIZATION_PASSWORD` | Required by `/API/Token/CreditToken/Generate` |
-| `GENI_TOKEN_TASK_PROTOCOL_ID`, `GENI_DISCONNECT_*`, `GENI_RECONNECT_*` | Remote-task protocol ids/payloads for these meters — confirm with the vendor |
+| `GENI_TOKEN_TASK_PROTOCOL_ID`, `GENI_DISCONNECT_*`, `GENI_RECONNECT_*` | Remote-task protocol ids. Defaults match the head-end console: token push 30000, Switch Off 20001, Switch On 20000 (relay tasks send no data) |
+| `GENI_POWER_UNIT` | Unit of instantaneous Active Power columns whose label doesn't say (`W`, default, or `kW`) |
 | `PAYSTACK_SECRET_KEY` | Checkout, webhooks (`POST /v1/webhooks/paystack`), bank resolution, subaccounts |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Email for login codes, password resets, payout codes and tenant invites (verify your domain in Resend) |
 | `JWT_SECRET`, `PUBLIC_URL`, `APP_ENV=production` | The server refuses to start in production with mocks or a weak secret |
 
-Things to verify against the real head-end once credentials are in (the collection
-only documents placeholders):
-1. The success `code` value (`GENI_SUCCESS_CODES`, default `0,200`).
-2. The `headline`/`data` format of `LoadProfile/*` rows. The parser accepts JSON and common delimiters, and picks the energy/volts/amps columns by name.
-3. Whether energy readings are cumulative registers or per-interval (`GENI_ENERGY_MODE`).
+What the real head-end does (checked against it and its console, Nov 2026; the
+API collection only documents placeholders):
+1. Success is `code` 0. Timestamps like `2026-11-18 10:00:00` are UTC.
+2. `LoadProfile/*` rows are a comma-separated `headline` plus `data`. The first cell is
+   the meter status text (`Relay Status; Terminal cover open;`), so data is split on the
+   headline's separator, not on `;`. Three-phase meters report each phase (voltage,
+   current, active/reactive power, forward and reverse); the live display shows the
+   highest phase voltage and the summed current and power.
+3. `IsThreePhase` is 0 (single-phase), 1 (three-phase) or 2 (three-phase on CTs) and must
+   match the meter, or the curves come back empty. It is re-read from `/API/Meter/Read` daily.
+4. `ElectricEnergyCurve` fails the whole query (code 99, "non-parsable characters") when
+   stored readings in the range are corrupt. The client splits the range and skips the
+   failing slices. Whether energy readings are cumulative or per-interval
+   (`GENI_ENERGY_MODE`) is still unconfirmed, since no readable energy rows exist yet.
+5. Remote tasks report status 0 (standing by), 1 (success) or 2 (failure) through
+   `GetControlTask` / `GetTokenTask`. Power switches stay pending until success (and roll
+   back on failure); GPRS token pushes become delivered, or fall back to the tenant
+   keying the token in.
+6. Usage and purchases from before the current tenancy (`meters.tenancy_started_at`) are
+   not shown to the tenant.
 
 ## API overview
 

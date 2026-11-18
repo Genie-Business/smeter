@@ -138,7 +138,8 @@ test('tenant sees the price and fee breakdown, pays, and the token is vended OTA
   const vended = await api.call('GET', `/v1/tenant/purchases/${p.body.reference}`, { token: tenantToken });
   const purchase = vended.body.purchase;
   assert.equal(purchase.status, 'vended');
-  assert.equal(purchase.delivery, 'ota_queued');
+  // Pushed over GPRS; the head-end confirms the task, so it shows as delivered.
+  assert.equal(purchase.delivery, 'ota_delivered');
   assert.match(purchase.token, /^\d{4}(-\d{4}){4}$/);
   assert.equal(purchase.units, 7.82);
   assert.ok(geni().tasks.some((t) => t.kind === 'token' && t.meterId === METER));
@@ -195,6 +196,13 @@ test('sweeper reconciles a payment whose webhook never arrived', async () => {
 });
 
 test('usage report has a point per day and comparisons', async () => {
+  // Readings from before this tenancy belong to someone else and aren't shown.
+  const before = await api.call('GET', '/v1/tenant/usage?period=month&date=2026-05-15', { token: tenantToken });
+  assert.equal(before.status, 200, before.text);
+  assert.equal(before.body.totalKwh, 0);
+  assert.equal(before.body.previousTotalKwh, 0);
+
+  await db().run('UPDATE meters SET tenancy_started_at = ? WHERE meter_id = ?', '2026-03-01T00:00:00.000Z', METER);
   const r = await api.call('GET', '/v1/tenant/usage?period=month&date=2026-05-15', { token: tenantToken });
   assert.equal(r.status, 200, r.text);
   assert.equal(r.body.points.length, 31);
@@ -208,6 +216,8 @@ test('usage report has a point per day and comparisons', async () => {
   const live = await api.call('GET', '/v1/tenant/live', { token: tenantToken });
   assert.equal(live.body.online, true);
   assert.ok(live.body.volts > 200);
+  assert.ok(live.body.kw > 0 && live.body.kw < 5, 'power in kW (the head-end reports W)');
+  assert.deepEqual(live.body.alarms, ['Relay Status']);
 });
 
 test('payout account: name check + OTP before saving', async () => {
@@ -237,9 +247,31 @@ test('dashboard, ledger and kill-switch', async () => {
   assert.equal(ledger.body.totals.purchases, 3);
   assert.equal(ledger.body.totals.debtRecovered, 200 + 150);
 
+  // Switch Off goes to the head-end as protocol 20001 with no data, and stays
+  // pending until the head-end reports the task succeeded.
   const off = await api.call('POST', `/v1/landlord/meters/${METER}/disconnect`, { token: landlordToken });
   assert.equal(off.status, 200);
-  assert.equal(off.body.meter.relayState, 'disconnected');
+  assert.equal(off.body.meter.relayState, 'disconnect_pending');
+  assert.equal(off.body.queued, false);
+  const confirmed = await api.call('GET', `/v1/landlord/meters/${METER}`, { token: landlordToken });
+  assert.equal(confirmed.body.meter.relayState, 'disconnected');
+  const tn = await api.call('GET', '/v1/tenant/notifications', { token: tenantToken });
+  assert.ok(tn.body.data.some((x) => x.title === 'Power disconnected'));
+
+  // A switch the meter doesn't carry out is rolled back and the owner told.
+  geni().failTasks = true;
+  try {
+    const on = await api.call('POST', `/v1/landlord/meters/${METER}/reconnect`, { token: landlordToken });
+    assert.equal(on.body.meter.relayState, 'reconnect_pending');
+    await sweepOnce();
+    const m = await db().get('SELECT relay_state, relay_task_id FROM meters WHERE meter_id = ?', METER);
+    assert.deepEqual({ ...m }, { relay_state: 'disconnected', relay_task_id: null });
+    const ln = await api.call('GET', '/v1/landlord/notifications', { token: landlordToken });
+    assert.ok(ln.body.data.some((x) => x.title === 'Couldn’t switch the meter on'));
+  } finally {
+    geni().failTasks = false;
+  }
+
   const offQueued = await api.call('POST', `/v1/landlord/meters/${OFFLINE_METER}/disconnect`, { token: landlordToken });
   assert.equal(offQueued.body.queued, true);
   assert.equal(offQueued.body.meter.relayState, 'disconnect_pending');

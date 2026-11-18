@@ -84,7 +84,7 @@ class _LiveDisplayCardState extends State<LiveDisplayCard> {
           _PulseDot(color: statusColor, pulsing: online),
           const SizedBox(width: Space.sm),
           Expanded(child: Text(statusText, style: SmeterText.caption(color: SmeterColors.inkSoft))),
-          if (r != null && r.relayState.startsWith('disconnect'))
+          if (r != null && r.relayState == 'disconnected')
             Text('Supply off', style: SmeterText.caption(color: SmeterColors.danger)),
         ]),
         const SizedBox(height: Space.lg),
@@ -93,6 +93,10 @@ class _LiveDisplayCardState extends State<LiveDisplayCard> {
           _Gauge(label: 'Current', value: r?.amps, unit: 'A', digits: 1, icon: Icons.waves_rounded),
           _Gauge(label: 'Load', value: r?.kw, unit: 'kW', digits: 2, icon: Icons.speed_rounded),
         ]),
+        if (r != null && r.alarms.isNotEmpty) ...[
+          const SizedBox(height: Space.md),
+          Text('Meter reports: ${r.alarms.join(' · ')}', style: SmeterText.caption(color: SmeterColors.warn)),
+        ],
       ]),
     );
   }

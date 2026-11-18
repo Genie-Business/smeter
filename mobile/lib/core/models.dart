@@ -264,6 +264,7 @@ class LiveReading {
       volts = _d(j['volts']),
       amps = _d(j['amps']),
       kw = _d(j['kw']),
+      alarms = [for (final a in (j['alarms'] as List? ?? const [])) a.toString()],
       relayState = j['relayState'] as String? ?? 'connected';
 
   final String mode;
@@ -273,6 +274,9 @@ class LiveReading {
   final double? volts;
   final double? amps;
   final double? kw;
+
+  /// Status flags the meter sends with its readings, e.g. "Terminal cover open".
+  final List<String> alarms;
   final String relayState;
 }
 

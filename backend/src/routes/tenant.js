@@ -5,6 +5,7 @@ import { requireTenant } from '../auth/middleware.js';
 import { geni } from '../geni/index.js';
 import { listNotifications, markAllRead, unreadCount } from '../services/notifications.js';
 import { accrueServiceCharge } from '../services/service-charge.js';
+import { refreshMeter, syncDeliveries, syncPhase } from '../services/meter-sync.js';
 import { liveReading, monthSummary, unitsBalance, usageReport } from '../services/usage.js';
 import { createPurchase, createServicePayment, getPurchase, purchaseDto, quoteFor, settlePayment } from '../services/vending.js';
 import { badRequest, notFound } from '../util/errors.js';
@@ -42,7 +43,8 @@ tenantRoutes.patch('/me', async (req, res) => {
 });
 
 tenantRoutes.get('/dashboard', async (req, res) => {
-  req.meter = await accrueServiceCharge(req.meter); // bills a new month before showing what's due
+  req.meter = await accrueServiceCharge(await refreshMeter(req.meter)); // bills a new month before showing what's due
+  await syncDeliveries({ meterId: req.meter.meter_id });
   const [recent, landlord, last, points, month, unread] = await Promise.all([
     db().all(
       `SELECT * FROM purchases WHERE meter_id = ? AND status IN ('vended','paid','vending','pending')
@@ -70,7 +72,7 @@ tenantRoutes.get('/dashboard', async (req, res) => {
 
 // Virtual display (SM-MON-001): the app polls this every ~5s while visible.
 tenantRoutes.get('/live', async (req, res) => {
-  res.json(await liveReading(req.meter));
+  res.json(await liveReading(await refreshMeter(req.meter)));
 });
 
 tenantRoutes.get('/usage', async (req, res) => {
@@ -84,7 +86,7 @@ tenantRoutes.get('/usage', async (req, res) => {
   const anchor = date ? new Date(`${date}T12:00:00+01:00`) : new Date();
   if (anchor.getTime() > Date.now() + 24 * 3600 * 1000) throw badRequest('That date is in the future');
   const landlord = await landlordOf(req.meter);
-  res.json(await usageReport(req.meter, landlord.unit_price_kobo, period, anchor));
+  res.json(await usageReport(await syncPhase(req.meter), landlord.unit_price_kobo, period, anchor));
 });
 
 const amountBody = z.object({ amount: z.coerce.number().positive('Enter an amount') });
@@ -145,6 +147,10 @@ tenantRoutes.get('/purchases/:reference', async (req, res) => {
     } catch (err) {
       console.error('[tenant] settle on poll failed', err.message);
     }
+  }
+  if (p.delivery === 'ota_queued') {
+    await syncDeliveries({ meterId: p.meter_id });
+    p = await getPurchase(p.reference);
   }
   res.json({
     purchase: purchaseDto(p),

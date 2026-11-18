@@ -80,13 +80,15 @@ export const config = {
     successCodes: (env.GENI_SUCCESS_CODES ?? '0,200').split(',').map((s) => Number(s.trim())),
     timeoutMs: num('GENI_TIMEOUT_MS', 20000),
     customerType: num('GENI_CUSTOMER_TYPE', 0),
-    // Remote-task protocol ids/payloads are meter-firmware specific; set them once
-    // the vendor confirms the values for these meters.
-    tokenTaskProtocolId: num('GENI_TOKEN_TASK_PROTOCOL_ID', 0),
-    disconnectProtocolId: num('GENI_DISCONNECT_PROTOCOL_ID', 0),
-    disconnectData: env.GENI_DISCONNECT_DATA ?? '0',
-    reconnectProtocolId: num('GENI_RECONNECT_PROTOCOL_ID', 0),
-    reconnectData: env.GENI_RECONNECT_DATA ?? '1',
+    // Remote-task protocol ids, as the head-end console sends them: token push
+    // 30000 (data = the token), relay Switch Off 20001 and Switch On 20000 (no data).
+    tokenTaskProtocolId: num('GENI_TOKEN_TASK_PROTOCOL_ID', 30000),
+    disconnectProtocolId: num('GENI_DISCONNECT_PROTOCOL_ID', 20001),
+    disconnectData: env.GENI_DISCONNECT_DATA ?? '',
+    reconnectProtocolId: num('GENI_RECONNECT_PROTOCOL_ID', 20000),
+    reconnectData: env.GENI_RECONNECT_DATA ?? '',
+    // Unit of the instantaneous "Active Power" columns when the label doesn't say.
+    powerUnit: env.GENI_POWER_UNIT === 'kW' ? 'kW' : 'W',
     pushTokensOta: bool('GENI_PUSH_TOKENS_OTA', true),
     // Load-profile energy columns are cumulative register readings by default.
     energyMode: env.GENI_ENERGY_MODE ?? 'cumulative', // 'cumulative' | 'interval'

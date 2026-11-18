@@ -3,9 +3,7 @@
 import { config } from '../config.js';
 import { db } from '../db.js';
 import { geni } from '../geni/index.js';
-import {
-  bucketConsumption, currentColumn, energyColumn, parseCurveRow, powerColumn, voltageColumn, balanceColumn,
-} from '../geni/parse.js';
+import { bucketConsumption, energyColumn, liveFigures, parseCurveRow, statusFlags } from '../geni/parse.js';
 import { koboToNaira } from '../util/http.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -71,17 +69,28 @@ export function periodWindow(period, anchor) {
   };
 }
 
+/** When the current tenancy began; earlier usage and purchases belong to someone else. */
+export function tenancyStart(meter) {
+  const t = new Date(meter.tenancy_started_at ?? meter.created_at ?? 0);
+  return Number.isNaN(t.getTime()) ? new Date(0) : t;
+}
+
 async function readings(meter, from, to) {
+  const start = tenancyStart(meter);
+  const since = from < start ? start : from;
+  if (since >= to) return [];
   const rows = await geni().loadProfile({
     meterId: meter.meter_id,
-    isThreePhase: Boolean(meter.is_three_phase),
-    from,
+    isThreePhase: meter.is_three_phase, // 0 single, 1 three-phase, 2 three-phase on CTs
+    from: since,
     to,
   });
-  return rows.map(parseCurveRow).map((r) => {
-    const col = energyColumn(r.values);
-    return { at: r.at, kwh: col === undefined ? NaN : r.values[col] };
-  });
+  return rows.map(parseCurveRow)
+    .filter((r) => r.at >= start)
+    .map((r) => {
+      const col = energyColumn(r.values);
+      return { at: r.at, kwh: col === undefined ? NaN : r.values[col] };
+    });
 }
 
 function summarise(win, totals, nowTs) {
@@ -110,8 +119,8 @@ export async function purchasesReport(meter, unitPriceKobo, period = 'month', an
   const prev = periodWindow(period, win.previous);
   const rows = await db().all(
     `SELECT units, total_kobo, vended_at FROM purchases
-     WHERE meter_id = ? AND status = 'vended' AND vended_at >= ? AND vended_at < ?`,
-    meter.meter_id, prev.start.toISOString(), win.end.toISOString(),
+     WHERE meter_id = ? AND status = 'vended' AND vended_at >= ? AND vended_at >= ? AND vended_at < ?`,
+    meter.meter_id, tenancyStart(meter).toISOString(), prev.start.toISOString(), win.end.toISOString(),
   );
   const tally = (w) => {
     const units = new Map();
@@ -187,7 +196,10 @@ export async function usageReport(meter, unitPriceKobo, period = 'month', anchor
     previousTotalKwh: before.total,
     projectedNextKwh: projectedNext,
     unitPrice: price,
-    note: 'The data you see may be 24 to 36 hours old. Readings arrive from the meter network on a delay.',
+    readings: rs.length,
+    note: rs.length
+      ? 'The data you see may be 24 to 36 hours old. Readings arrive from the meter network on a delay.'
+      : 'Your meter hasn’t sent usage readings for this period yet. They appear here once the meter network receives them.',
   };
 }
 
@@ -201,18 +213,18 @@ export async function monthSummary(meter) {
   const win = periodWindow('month', new Date());
   const m = await db().get(
     `SELECT COALESCE(SUM(units), 0) AS units, COALESCE(SUM(total_kobo), 0) AS spend, COUNT(*) AS n
-     FROM purchases WHERE meter_id = ? AND status = 'vended' AND vended_at >= ?`,
-    meter.meter_id, win.start.toISOString(),
+     FROM purchases WHERE meter_id = ? AND status = 'vended' AND vended_at >= ? AND vended_at >= ?`,
+    meter.meter_id, win.start.toISOString(), tenancyStart(meter).toISOString(),
   );
   return { units: round(m.units), spend: koboToNaira(m.spend), purchases: m.n };
 }
 
 export async function unitsBalance(meter) {
   if (meter.delivery_mode === 'manual') return null; // no readings to subtract
-  const since = new Date(Date.now() - 90 * DAY).toISOString();
+  const since = new Date(Math.max(Date.now() - 90 * DAY, tenancyStart(meter).getTime())).toISOString();
   const row = await db().get(
     `SELECT COALESCE(SUM(units), 0) AS units, MIN(vended_at) AS first FROM purchases
-     WHERE meter_id = ? AND status = 'vended' AND vended_at >= ?`,
+     WHERE meter_id = ? AND status = 'vended' AND kind = 'units' AND vended_at >= ?`,
     meter.meter_id, since,
   );
   if (!row.first) return 0;
@@ -234,7 +246,7 @@ const liveCache = new Map();
 export async function liveReading(meter) {
   // No GPRS link in manual mode: never poll the head-end.
   if (meter.delivery_mode === 'manual') {
-    return { mode: 'manual', online: false, lastSeen: null, readingAt: null, volts: null, amps: null, kw: null, meterBalanceKwh: null, relayState: meter.relay_state };
+    return { mode: 'manual', online: false, lastSeen: null, readingAt: null, volts: null, amps: null, kw: null, meterBalanceKwh: null, alarms: [], relayState: meter.relay_state };
   }
   const hit = liveCache.get(meter.meter_id);
   if (hit && hit.expires > Date.now()) return hit.value;
@@ -245,27 +257,24 @@ export async function liveReading(meter) {
     client
       .instantaneous({
         meterId: meter.meter_id,
-        isThreePhase: Boolean(meter.is_three_phase),
-        from: new Date(Date.now() - DAY),
+        isThreePhase: meter.is_three_phase,
+        from: new Date(Math.max(Date.now() - DAY, tenancyStart(meter).getTime())),
         to: new Date(),
       })
       .catch(() => []),
   ]);
   const latest = rows.map(parseCurveRow).sort((a, b) => b.at - a.at)[0];
-  const pick = (fn) => {
-    if (!latest) return null;
-    const col = fn(latest.values);
-    return col === undefined ? null : latest.values[col];
-  };
+  const figures = latest
+    ? liveFigures(latest.values, { powerUnit: config.geni.powerUnit })
+    : { volts: null, amps: null, kw: null, meterBalanceKwh: null };
   const value = {
     mode: 'ota',
     online: status.online,
     lastSeen: status.lastSeen ?? (latest ? latest.at.toISOString() : null),
     readingAt: latest ? latest.at.toISOString() : null,
-    volts: pick(voltageColumn),
-    amps: pick(currentColumn),
-    kw: pick(powerColumn),
-    meterBalanceKwh: pick(balanceColumn),
+    ...figures,
+    // Status flags the meter reports with each reading, e.g. "Terminal cover open".
+    alarms: latest ? statusFlags(latest.texts) : [],
     relayState: meter.relay_state,
   };
   liveCache.set(meter.meter_id, { value, expires: Date.now() + config.liveCacheSeconds * 1000 });

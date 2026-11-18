@@ -658,12 +658,13 @@ class MeterDetailScreen extends ConsumerWidget {
                     ),
                   if (d.live?.volts != null) KeyValueRow('Voltage', '${d.live!.volts!.toStringAsFixed(0)} V'),
                   if (d.live?.kw != null) KeyValueRow('Load', '${d.live!.kw!.toStringAsFixed(2)} kW'),
+                  if (d.live?.alarms.isNotEmpty ?? false) KeyValueRow('Meter reports', d.live!.alarms.join(' · '), valueColor: SmeterColors.warn),
                   KeyValueRow(
                     'Supply',
                     switch (m.relayState) {
-                      'disconnect_pending' => 'Disconnect queued',
+                      'disconnect_pending' => 'Switching off (waiting for the meter)',
                       'disconnected' => 'Off',
-                      'reconnect_pending' => 'Reconnect queued',
+                      'reconnect_pending' => 'Switching on (waiting for the meter)',
                       _ => 'On',
                     },
                   ),
@@ -812,7 +813,7 @@ class MeterDetailScreen extends ConsumerWidget {
       ref.invalidate(meterDetailProvider(m.meterId));
       ref.invalidate(metersProvider);
       if (context.mounted) {
-        showInfo(context, queued ? 'Meter is offline. This runs when it reconnects.' : 'Command sent to the meter.');
+        showInfo(context, queued ? 'Meter is offline. This runs when it reconnects.' : 'Command sent. The status updates once the meter confirms.');
       }
     } catch (e) {
       if (context.mounted) showError(context, e);

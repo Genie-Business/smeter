@@ -76,6 +76,12 @@ ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_payer TEXT NOT NULL DEFAULT 
 ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_due_kobo BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_owner_due_kobo BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE meters ADD COLUMN IF NOT EXISTS service_billed_until TEXT;
+-- When the current tenancy began: usage before it belongs to someone else (NULL = created_at).
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS tenancy_started_at TEXT;
+-- Head-end task for the last power switch; relay_state stays *_pending until it succeeds.
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS relay_task_id TEXT;
+-- When the meter's phase type was last read from the head-end.
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS head_end_checked_at TEXT;
 
 CREATE TABLE IF NOT EXISTS purchases (
   ${ID},

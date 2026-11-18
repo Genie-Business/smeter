@@ -39,3 +39,17 @@ test('interval mode sums readings directly', () => {
   const totals = bucketConsumption([{ at: t, kwh: 2 }, { at: t, kwh: 3 }], () => 'x', 'interval');
   assert.equal(totals.get('x'), 5);
 });
+
+test('real three-phase instantaneous row: status text keeps its semicolons, phases are combined', async () => {
+  const { liveFigures, statusFlags } = await import('../src/geni/parse.js');
+  const r = parseCurveRow({
+    currentDate: '2026-11-18 10:00:00',
+    headline: 'Meter status,Phase-A Voltage,Phase-B Voltage,Phase-C Voltage,Phase-A Current,Phase-B Current,Phase-C Current,'
+      + 'Phase-N Current,Phase-A Active Power,Phase-B Active Power,Phase-C Active Power,Phase-A Reverse Active Power',
+    data: 'Relay Status; Terminal cover open; ,0.0,0.0,232.4,0.000,0.000,1.250,1.249,0,0,280,5',
+  });
+  assert.equal(r.at.toISOString(), '2026-11-18T10:00:00.000Z'); // head-end times are UTC
+  assert.equal(r.values['Phase-C Voltage'], 232.4);
+  assert.deepEqual(statusFlags(r.texts), ['Relay Status', 'Terminal cover open']);
+  assert.deepEqual(liveFigures(r.values), { volts: 232.4, amps: 1.25, kw: 0.28, meterBalanceKwh: null });
+});

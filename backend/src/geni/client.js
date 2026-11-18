@@ -23,6 +23,15 @@ function jwtExpiry(token) {
 
 const fmtDate = (d) => new Date(d).toISOString();
 
+// Remote-task status as the head-end console shows it: 0 standing by, 1 success, 2 failure.
+const TASK_STATUS = { 0: 'pending', 1: 'success', 2: 'failed' };
+// Smallest range skipped when the head-end can't read a stored reading.
+const BAD_SLICE_MS = 60 * 60 * 1000;
+// Most range splits one query may make around unreadable readings.
+const MAX_SPLITS = 12;
+// Meter phase type for load-profile queries (accepts a boolean for older callers).
+const phaseParam = (v) => (v === true ? 1 : Number(v) || 0);
+
 export class GeniClient {
   constructor(cfg = config.geni, fetchImpl = fetch) {
     this.cfg = cfg;
@@ -98,7 +107,9 @@ export class GeniClient {
   async getMeter(meterId) {
     const result = await this.raw('/API/Meter/Read', this.base({ meterId, pageNumber: 1, pageSize: 5 }));
     const m = (result?.data ?? []).find((row) => String(row.meterId) === String(meterId));
-    return m ? { meterId: m.meterId, isThreePhase: Boolean(m.isThreePhase), type: m.type } : null;
+    // isThreePhase is 0 (single-phase), 1 (three-phase) or 2 (three-phase on CTs);
+    // the load-profile queries take the same value.
+    return m ? { meterId: m.meterId, isThreePhase: Boolean(Number(m.isThreePhase)), phaseType: Number(m.isThreePhase) || 0, type: m.type } : null;
   }
 
   async getAccount(meterId) {
@@ -191,15 +202,30 @@ export class GeniClient {
 
   async control({ customerId, meterId, action }) {
     const disconnect = action === 'disconnect';
+    // The head-end console sends only the protocol id for relay switching
+    // (20001 Switch Off, 20000 Switch On); `data` is added only if configured.
+    const data = disconnect ? this.cfg.disconnectData : this.cfg.reconnectData;
     const result = await this.raw('/API/RemoteMeterTask/CreateControlTask', [
       this.base({
         customerId,
         meterId,
         protocolId: disconnect ? this.cfg.disconnectProtocolId : this.cfg.reconnectProtocolId,
-        data: disconnect ? this.cfg.disconnectData : this.cfg.reconnectData,
+        ...(data ? { data } : {}),
       }),
     ]);
     return { taskId: extractTaskId(result) };
+  }
+
+  /**
+   * Outcome of a remote task: 'pending' (standing by), 'success' or 'failed', or
+   * null when the task isn't found. kind: 'control' | 'token' | 'reading'.
+   */
+  async taskStatus(kind, taskId) {
+    const path = { control: 'GetControlTask', token: 'GetTokenTask', reading: 'GetReadingTask' }[kind];
+    const result = await this.raw(`/API/RemoteMeterTask/${path}`, this.base({ lang: 'en', id: Number(taskId), pageNumber: 1, pageSize: 5 }));
+    const row = (result?.data ?? []).find((t) => String(t.id) === String(taskId));
+    if (!row) return null;
+    return { status: TASK_STATUS[Number(row.status)] ?? 'pending', updatedAt: row.updateDate ?? null };
   }
 
   async onlineStatus(meterId) {
@@ -214,12 +240,35 @@ export class GeniClient {
     return { online, lastSeen: row.statusUpdateDate ?? null };
   }
 
-  async curve(path, { meterId, isThreePhase, from, to, maxPages = 20 }) {
+  async curve(path, args, budget = { splits: MAX_SPLITS }) {
+    const { from, to } = args;
+    try {
+      return await this.curvePages(path, args);
+    } catch (err) {
+      // The head-end fails the whole query (code 99, "non-parsable characters")
+      // when a stored reading in the range is corrupt. Split the range so the
+      // good readings still come through, and skip the slices that fail; a
+      // budget keeps a badly corrupted stretch from turning into dozens of calls.
+      if (!(err instanceof GeniError) || err.code !== 99) throw err;
+      const span = new Date(to) - new Date(from);
+      if (span <= BAD_SLICE_MS || budget.splits <= 0) {
+        console.warn(`[geni] skipping unreadable readings ${fmtDate(from)}..${fmtDate(to)} for meter ${args.meterId}`);
+        return [];
+      }
+      budget.splits -= 1;
+      const mid = new Date(new Date(from).getTime() + Math.floor(span / 2));
+      const first = await this.curve(path, { ...args, to: mid }, budget);
+      const second = await this.curve(path, { ...args, from: mid }, budget);
+      return [...first, ...second];
+    }
+  }
+
+  async curvePages(path, { meterId, isThreePhase, from, to, maxPages = 20 }) {
     const rows = [];
     for (let page = 1; page <= maxPages; page++) {
       const result = await this.raw(path, {
         lang: 'en',
-        IsThreePhase: isThreePhase ? 1 : 0,
+        IsThreePhase: phaseParam(isThreePhase),
         pageNumber: page,
         pageSize: 500,
         meterId,

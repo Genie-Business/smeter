@@ -21,11 +21,28 @@ function splitCells(value) {
   return [s];
 }
 
-/** Turn one upstream row into { at: Date, values: { label: number } }. */
+// The separator used by the column labels; the values use the same one. The
+// real head-end sends e.g. headline "Meter status,Phase-A Voltage,..." with
+// data "Relay Status; Terminal cover open; ,0.0,229.7,...": the status text
+// has semicolons of its own, so the data must not be split on those.
+function separatorOf(headline) {
+  const s = String(headline ?? '').trim();
+  if (s.startsWith('[') || s.startsWith('{')) return undefined; // JSON: handled by splitCells
+  return [',', '|', '\t', ';'].find((sep) => s.includes(sep));
+}
+
+/**
+ * Turn one upstream row into { at: Date, values: { label: number }, texts: { label: string } }.
+ * Non-numeric cells (like the meter status) go to `texts`.
+ */
 export function parseCurveRow(row) {
-  const labels = splitCells(row.headline);
-  const cells = splitCells(row.data);
+  const sep = separatorOf(row.headline);
+  const labels = sep ? String(row.headline).split(sep).map((c) => c.trim()) : splitCells(row.headline);
+  const cells = sep && typeof row.data === 'string' && !/^\s*[[{]/.test(row.data)
+    ? row.data.split(sep).map((c) => c.trim())
+    : splitCells(row.data);
   const values = {};
+  const texts = {};
   cells.forEach((cell, i) => {
     let label = labels[i] ?? `col${i}`;
     let raw = cell;
@@ -34,10 +51,58 @@ export function parseCurveRow(row) {
       label = kv[1].trim();
       raw = kv[2];
     }
-    const n = Number.parseFloat(String(raw).replace(/[^\d.eE+-]/g, ''));
-    if (Number.isFinite(n)) values[label.trim()] = n;
+    const str = String(raw).trim();
+    if (/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*[a-zA-Z%]*$/.test(str)) {
+      values[label.trim()] = Number.parseFloat(str);
+    } else if (str) {
+      texts[label.trim()] = str;
+    }
   });
-  return { at: new Date(row.currentDate ?? row.createDate), values };
+  return { at: headEndTime(row.currentDate ?? row.createDate), values, texts };
+}
+
+/**
+ * Head-end timestamps look like "2026-11-18 10:00:00" with no zone. They are
+ * UTC (the hourly reading for 11:00 appears at 11:03 UTC), so read them as UTC
+ * rather than in the server's local zone.
+ */
+export function headEndTime(value) {
+  const s = String(value ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) return new Date(`${s.replace(' ', 'T')}Z`);
+  return new Date(s);
+}
+
+/** Alarm/status flags from the meter-status cell, e.g. ['Relay Status', 'Terminal cover open']. */
+export function statusFlags(texts = {}) {
+  const key = Object.keys(texts).find((k) => /status/i.test(k)) ?? Object.keys(texts)[0];
+  if (key === undefined) return [];
+  return texts[key].split(';').map((f) => f.trim()).filter(Boolean);
+}
+
+const isNeutral = (k) => /phase-?\s*n(\s|$)|neutral/i.test(k);
+const isActivePower = (k) => /active\s*power/i.test(k) && !/reverse|reactive|export/i.test(k);
+
+/**
+ * Live "virtual display" figures from one instantaneous row. Three-phase meters
+ * report each phase: voltage is the highest live phase, current and power are
+ * summed. Power is in W unless the label says kW (powerUnit overrides that guess).
+ */
+export function liveFigures(values, { powerUnit = 'W' } = {}) {
+  const keys = Object.keys(values);
+  const volts = keys.filter((k) => /volt/i.test(k)).map((k) => values[k]);
+  const amps = keys.filter((k) => /current/i.test(k) && !isNeutral(k)).map((k) => values[k]);
+  const power = keys.filter(isActivePower);
+  const kw = power.length
+    ? power.reduce((sum, k) => sum + values[k] / (/kw/i.test(k) || powerUnit === 'kW' ? 1 : 1000), 0)
+    : null;
+  const balance = balanceColumn(values);
+  const round = (n, dp) => (n == null ? null : Math.round(n * 10 ** dp) / 10 ** dp);
+  return {
+    volts: volts.length ? round(Math.max(...volts), 1) : null,
+    amps: amps.length ? round(amps.reduce((a, b) => a + b, 0), 3) : null,
+    kw: round(kw, 3),
+    meterBalanceKwh: balance === undefined ? null : values[balance],
+  };
 }
 
 const ENERGY_PATTERNS = [

@@ -11,6 +11,7 @@ import { codeEmail, inviteEmail, maskEmail, sendEmail } from '../providers/email
 import { listNotifications, markAllRead, notify, unreadCount } from '../services/notifications.js';
 import { getGeniSettings, getTariffSettings } from '../services/settings.js';
 import { billedUntilAfterChange, SERVICE_PAYERS } from '../services/service-charge.js';
+import { refreshMeter, syncDeliveries, syncRelay } from '../services/meter-sync.js';
 import { liveReading } from '../services/usage.js';
 import { createPurchase, getPurchase, landlordPurchaseDto, settlePayment, vend } from '../services/vending.js';
 import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
@@ -274,7 +275,8 @@ landlordRoutes.get('/meters/check/:meterId', async (req, res) => {
 });
 
 landlordRoutes.get('/meters', async (req, res) => {
-  const meters = await db().all("SELECT * FROM meters WHERE landlord_id = ? AND status != 'removed' ORDER BY id DESC", req.landlord.id);
+  const rows = await db().all("SELECT * FROM meters WHERE landlord_id = ? AND status != 'removed' ORDER BY id DESC", req.landlord.id);
+  const meters = await Promise.all(rows.map((m) => syncRelay(m))); // settle pending power switches
   res.json({ meters: meters.map(meterDto) });
 });
 
@@ -331,7 +333,7 @@ landlordRoutes.post('/meters', async (req, res) => {
 
   const values = [
     req.landlord.id, body.address, body.apartment, body.tenantFirstName ?? null, body.tenantLastName ?? null,
-    tenantPhone, info.isThreePhase ? 1 : 0, customerId, nairaToKobo(body.debtAmount), body.debtRecoveryPercent,
+    tenantPhone, info.phaseType ?? (info.isThreePhase ? 1 : 0), customerId, nairaToKobo(body.debtAmount), body.debtRecoveryPercent,
     body.deliveryMode, body.tenantEmail, body.servicePayer,
   ];
   if (existing) {
@@ -340,18 +342,20 @@ landlordRoutes.post('/meters', async (req, res) => {
       `UPDATE meters SET landlord_id = ?, address = ?, apartment = ?, tenant_first_name = ?, tenant_last_name = ?,
          tenant_phone = ?, is_three_phase = ?, customer_id = ?, debt_kobo = ?, debt_recovery_percent = ?,
          delivery_mode = ?, tenant_email = ?, service_payer = ?, status = 'invited', accepted_at = NULL,
-         relay_state = 'connected', service_due_kobo = 0, service_owner_due_kobo = 0, service_billed_until = NULL
+         relay_state = 'connected', relay_task_id = NULL, service_due_kobo = 0, service_owner_due_kobo = 0,
+         service_billed_until = NULL, tenancy_started_at = ?, head_end_checked_at = ?
        WHERE meter_id = ? AND status = 'removed'`,
-      ...values, body.meterId,
+      ...values, now(), now(), body.meterId,
     );
     if (r.changes !== 1) throw conflict('This meter is already assigned to another active tenant');
   } else {
     try {
       await db().run(
         `INSERT INTO meters (landlord_id, address, apartment, tenant_first_name, tenant_last_name, tenant_phone,
-           is_three_phase, customer_id, debt_kobo, debt_recovery_percent, delivery_mode, tenant_email, service_payer, meter_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ...values, body.meterId,
+           is_three_phase, customer_id, debt_kobo, debt_recovery_percent, delivery_mode, tenant_email, service_payer,
+           tenancy_started_at, head_end_checked_at, meter_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ...values, now(), now(), body.meterId,
       );
     } catch (err) {
       if (err.code === '23505') throw conflict('This meter is already assigned to another active tenant');
@@ -364,7 +368,8 @@ landlordRoutes.post('/meters', async (req, res) => {
 });
 
 landlordRoutes.get('/meters/:meterId', async (req, res) => {
-  const meter = await ownedMeter(req.landlord, req.params.meterId);
+  const meter = await refreshMeter(await ownedMeter(req.landlord, req.params.meterId));
+  await syncDeliveries({ meterId: meter.meter_id });
   const purchases = await db().all(
     `SELECT * FROM purchases WHERE meter_id = ? AND landlord_id = ? ORDER BY id DESC LIMIT 20`,
     meter.meter_id, req.landlord.id,
@@ -446,21 +451,18 @@ for (const action of ['disconnect', 'reconnect']) {
       throw conflict('This meter uses manual tokens (no GPRS link), so it can’t be switched remotely.');
     }
     let online = false;
+    let taskId = null;
     try {
       ({ online } = await geni().onlineStatus(meter.meter_id));
-      await geni().control({ customerId: meter.customer_id, meterId: meter.meter_id, action });
+      ({ taskId } = await geni().control({ customerId: meter.customer_id, meterId: meter.meter_id, action }));
     } catch (err) {
       throw asUpstream(err);
     }
-    const state = action === 'disconnect' ? (online ? 'disconnected' : 'disconnect_pending') : (online ? 'connected' : 'reconnect_pending');
-    await db().run('UPDATE meters SET relay_state = ? WHERE id = ?', state, meter.id);
-    await notify({
-      recipientType: 'tenant', recipientId: meter.meter_id, kind: 'relay',
-      title: action === 'disconnect' ? 'Power disconnected' : 'Power reconnected',
-      body: action === 'disconnect'
-        ? 'Your property owner remotely disconnected supply to this meter. Contact them for help.'
-        : 'Supply to your meter has been restored.',
-    });
+    // Pending until the head-end reports the meter carried it out (see meter-sync);
+    // the tenant is told once it's confirmed.
+    let state = action === 'disconnect' ? 'disconnect_pending' : 'reconnect_pending';
+    if (!taskId && online) state = action === 'disconnect' ? 'disconnected' : 'connected'; // nothing to follow up
+    await db().run('UPDATE meters SET relay_state = ?, relay_task_id = ? WHERE id = ?', state, taskId, meter.id);
     res.json({ meter: meterDto(await db().get('SELECT * FROM meters WHERE id = ?', meter.id)), queued: !online });
   });
 }

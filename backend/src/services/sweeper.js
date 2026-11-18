@@ -3,10 +3,12 @@
 //    with the gateway (the "audit alert" path);
 //  - paid purchases whose token generation failed are retried;
 //  - owner subaccounts made before product tagging get the smeter tag;
-//  - GPRS service charges are billed for each month that has started.
+//  - GPRS service charges are billed for each month that has started;
+//  - pending power switches and GPRS token pushes are confirmed with the head-end.
 import { db, now } from '../db.js';
 import { refreshGeni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
+import { syncAll } from './meter-sync.js';
 import { accrueAll } from './service-charge.js';
 import { paymentParams } from './settings.js';
 import { settlePayment, vend } from './vending.js';
@@ -60,6 +62,7 @@ export async function sweepOnce() {
   }
 
   await accrueAll();
+  await syncAll();
 }
 
 export function startSweeper(intervalMs = 60 * 1000) {

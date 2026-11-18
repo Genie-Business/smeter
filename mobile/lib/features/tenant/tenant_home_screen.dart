@@ -45,7 +45,7 @@ class TenantHomeScreen extends ConsumerWidget {
             children: [
               _HeroCard(dash: d, onBuy: () => openBuyPower(context, ref, t)),
               const AnnouncementBanner(tenant: true),
-              if (t.relayState.startsWith('disconnect'))
+              if (t.relayState == 'disconnected')
                 const InfoBanner(
                   icon: Icons.power_off_rounded,
                   tone: Tone.danger,
