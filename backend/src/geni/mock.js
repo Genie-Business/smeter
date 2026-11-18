@@ -79,11 +79,13 @@ export class MockGeniClient {
     return { taskId: String(this.tasks.length) };
   }
 
-  /** Tasks succeed unless failTasks is set (tests). */
+  /** Tasks wait while the meter is offline; otherwise they succeed unless failTasks is set (tests). */
   async taskStatus(kind, taskId) {
     const task = this.tasks[Number(taskId) - 1];
     if (!task) return null;
-    return { status: this.failTasks ? 'failed' : 'success', updatedAt: new Date().toISOString() };
+    if (this.failTasks) return { status: 'failed', updatedAt: new Date().toISOString() };
+    const online = (await this.onlineStatus(task.meterId)).online;
+    return { status: online ? 'success' : 'pending', updatedAt: new Date().toISOString() };
   }
 
   async onlineStatus(meterId) {

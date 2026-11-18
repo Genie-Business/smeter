@@ -186,13 +186,20 @@ class ReceiptBody extends StatelessWidget {
           'Your token is ready',
           deliveryMode == 'manual'
               ? 'Type it into your meter remote to load your units.'
-              : 'Your meter was offline, so enter this token on the meter remote.'
+              : "We couldn't load it onto your meter automatically, so enter this token on the meter remote."
+        ),
+      'vended' when p.delivery == 'ota_delivered' => (
+          Icons.check_circle_rounded,
+          Tone.success,
+          'Units loaded',
+          'Your meter confirmed it received the units.'
         ),
       'vended' => (
           Icons.bolt_rounded,
           Tone.success,
           'Power on the way',
-          'Units are being sent to your meter and usually arrive within seconds.'
+          'Units are being sent to your meter. If it is offline they load when it reconnects, '
+              'or enter the backup token below to load them now.'
         ),
       'failed' => (
           Icons.close_rounded,

@@ -214,7 +214,8 @@ API collection only documents placeholders):
 5. Remote tasks report status 0 (standing by), 1 (success) or 2 (failure) through
    `GetControlTask` / `GetTokenTask`. Power switches stay pending until success (and roll
    back on failure); GPRS token pushes become delivered, or fall back to the tenant
-   keying the token in.
+   keying the token in. Tokens are pushed to offline meters too: the head-end holds the
+   task until the meter reconnects.
 6. Usage and purchases from before the current tenancy (`meters.tenancy_started_at`) are
    not shown to the tenant.
 

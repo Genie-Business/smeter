@@ -14,6 +14,11 @@ const PHASE_RECHECK_MS = 24 * 60 * 60 * 1000;
 const TASK_RECHECK_MS = 10 * 1000; // absorbs the app's 5s polling
 const lastTaskCheck = new Map();
 
+/** Tests: forget recent checks so the next one goes to the head-end. */
+export function resetSyncThrottle() {
+  lastTaskCheck.clear();
+}
+
 function throttled(key) {
   const at = lastTaskCheck.get(key) ?? 0;
   if (Date.now() - at < TASK_RECHECK_MS) return true;

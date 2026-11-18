@@ -7,6 +7,7 @@ import { startServer } from './helpers.js';
 const { geni } = await import('../src/geni/index.js');
 const { settlePayment } = await import('../src/services/vending.js');
 const { sweepOnce } = await import('../src/services/sweeper.js');
+const { resetSyncThrottle } = await import('../src/services/meter-sync.js');
 const { db } = await import('../src/db.js');
 const { resetRateLimits } = await import('../src/util/rateLimit.js');
 
@@ -160,16 +161,28 @@ test('tenant sees the price and fee breakdown, pays, and the token is vended OTA
   assert.equal(typeof dash.body.points, 'number');
 });
 
-test('offline meter falls back to a manual token', async () => {
+test('offline meter: the token is still sent and loads when it reconnects; a failed push falls back to keying it in', async () => {
   const token = await tenantLogin(OFFLINE_METER);
   const p = await api.call('POST', '/v1/tenant/purchases', { token, body: { amount: 1000 } });
   await payWithMock(p.body.authorizationUrl);
   const r = await api.call('GET', `/v1/tenant/purchases/${p.body.reference}`, { token });
   assert.equal(r.body.purchase.status, 'vended');
-  assert.equal(r.body.purchase.delivery, 'manual');
+  assert.equal(r.body.purchase.delivery, 'ota_queued'); // waiting on the head-end until the meter reconnects
+  assert.ok(geni().tasks.some((t) => t.kind === 'token' && t.meterId === OFFLINE_METER && t.token === r.body.purchase.token.replace(/-/g, '')));
   const n = await api.call('GET', '/v1/tenant/notifications', { token });
-  assert.equal(n.body.data[0].title, 'Your token is ready');
-  assert.match(n.body.data[0].body, /offline/);
+  assert.equal(n.body.data[0].title, 'Power units on the way');
+  assert.match(n.body.data[0].body, /offline.*reconnects/);
+
+  geni().failTasks = true;
+  resetSyncThrottle();
+  try {
+    const failed = await api.call('GET', `/v1/tenant/purchases/${p.body.reference}`, { token });
+    assert.equal(failed.body.purchase.delivery, 'manual');
+    const n2 = await api.call('GET', '/v1/tenant/notifications', { token });
+    assert.equal(n2.body.data[0].title, 'Enter your token on the meter');
+  } finally {
+    geni().failTasks = false;
+  }
 });
 
 test('declined payment is marked failed and not vended', async () => {

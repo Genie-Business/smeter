@@ -217,19 +217,19 @@ export async function vend(reference) {
     return getPurchase(reference);
   }
 
-  // Over-the-air delivery when the meter uses GPRS and is online. Otherwise the
-  // tenant keys the token into the meter remote (the app shows it on the receipt).
+  // Over-the-air delivery for GPRS meters. The head-end holds the task until an
+  // offline meter reconnects, so the token is sent either way; the tenant can
+  // also key it in from the receipt (a meter ignores a token it has already used).
   const manualMode = meter?.delivery_mode === 'manual';
   let delivery = 'manual';
   let taskId = null;
+  let online = true;
   if (config.geni.pushTokensOta && !manualMode) {
     try {
-      const status = await client.onlineStatus(p.meter_id);
-      if (status.online) {
-        const task = await client.pushToken({ customerId: meter?.customer_id, meterId: p.meter_id, token: minted.token });
-        delivery = 'ota_queued';
-        taskId = task.taskId;
-      }
+      online = (await client.onlineStatus(p.meter_id).catch(() => ({ online: false }))).online;
+      const task = await client.pushToken({ customerId: meter?.customer_id, meterId: p.meter_id, token: minted.token });
+      delivery = 'ota_queued';
+      taskId = task.taskId;
     } catch (err) {
       console.error('[vend] OTA push failed, falling back to manual token', err.message);
     }
@@ -256,7 +256,9 @@ export async function vend(reference) {
     recipientType: 'tenant', recipientId: p.meter_id, kind: 'vended',
     title: delivery === 'manual' ? 'Your token is ready' : 'Power units on the way',
     body: delivery === 'ota_queued'
-      ? `${units} for ${naira(p.amount_kobo)} is being sent to your meter.`
+      ? online
+        ? `${units} for ${naira(p.amount_kobo)} is being sent to your meter.`
+        : `Your meter is offline, so ${units} will load when it reconnects. To load it now, enter ${formatToken(minted.token)} on your meter remote.`
       : manualMode
         ? `Enter ${formatToken(minted.token)} on your meter remote to load ${units}.`
         : `Your meter is offline. Enter ${formatToken(minted.token)} on your meter remote to load ${units}.`,

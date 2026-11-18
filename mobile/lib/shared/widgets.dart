@@ -396,7 +396,8 @@ class StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final (label, tone, icon) = switch (status) {
       'vended' when delivery == 'manual' => ('Token ready', Tone.success, Icons.vpn_key_rounded),
-      'vended' => ('Sent to meter', Tone.success, Icons.check_rounded),
+      'vended' when delivery == 'ota_delivered' => ('Loaded on meter', Tone.success, Icons.check_rounded),
+      'vended' => ('Sending to meter', Tone.info, Icons.bolt_rounded),
       'pending' => ('Awaiting payment', Tone.warn, Icons.schedule_rounded),
       'paid' || 'vending' => ('Processing', Tone.info, Icons.autorenew_rounded),
       'failed' => ('Failed', Tone.danger, Icons.close_rounded),
