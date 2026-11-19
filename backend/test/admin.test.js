@@ -88,6 +88,42 @@ test('overview, owners and meters', async () => {
   assert.equal(missing.status, 404);
 });
 
+test('clear-tamper tokens: owners generate them, editors only see the history', async () => {
+  const forbidden = await api.call('POST', '/v1/staff/tamper-tokens', {
+    token: editorToken, body: { meterId: '47009990001', reason: 'Cover opened during install' },
+  });
+  assert.equal(forbidden.status, 403);
+  const noReason = await api.call('POST', '/v1/staff/tamper-tokens', { token: staffToken, body: { meterId: '47009990001', reason: '' } });
+  assert.equal(noReason.status, 400);
+  const unknown = await api.call('POST', '/v1/staff/tamper-tokens', {
+    token: staffToken, body: { meterId: '0009990001', reason: 'Cover opened during install' },
+  });
+  assert.equal(unknown.status, 404);
+
+  const made = await api.call('POST', '/v1/staff/tamper-tokens', {
+    token: staffToken, body: { meterId: '47009990001', reason: 'Cover opened during install' },
+  });
+  assert.equal(made.status, 201, made.text);
+  assert.match(made.body.tamperToken.token, /^\d{20}$/);
+  assert.equal(made.body.tamperToken.by, 'Ops Owner');
+
+  // Meters not added to smeter work too (any meter on the head-end).
+  const other = await api.call('POST', '/v1/staff/tamper-tokens', {
+    token: staffToken, body: { meterId: '47005551234', reason: 'Bench test' },
+  });
+  assert.equal(other.status, 201, other.text);
+
+  const all = await api.call('GET', '/v1/staff/tamper-tokens', { token: editorToken });
+  assert.deepEqual(all.body.data.map((t) => t.meterId), ['47005551234', '47009990001']);
+  const one = await api.call('GET', '/v1/staff/tamper-tokens?meterId=47009990001', { token: editorToken });
+  assert.deepEqual(one.body.data.map((t) => [t.meterId, t.reason]), [['47009990001', 'Cover opened during install']]);
+
+  // The meter's owner is told.
+  const { db } = await import('../src/db.js');
+  const n = await db().get("SELECT title FROM notifications WHERE recipient_type = 'landlord' AND kind = 'tamper'");
+  assert.equal(n.title, 'Tamper token issued');
+});
+
 test('content: defaults, sanitised saves, versions, restore', async () => {
   const pub = await api.call('GET', '/v1/public/content/site');
   assert.equal(pub.status, 200);

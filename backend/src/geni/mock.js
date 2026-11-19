@@ -69,6 +69,12 @@ export class MockGeniClient {
     };
   }
 
+  async clearTamperToken(meterId) {
+    this.receipt += 1;
+    this.tasks.push({ kind: 'clear_tamper', meterId });
+    return { token: Array.from({ length: 20 }, () => randomInt(0, 10)).join(''), receiptId: String(this.receipt) };
+  }
+
   async pushToken({ meterId, token }) {
     this.tasks.push({ kind: 'token', meterId, token });
     return { taskId: String(this.tasks.length) };

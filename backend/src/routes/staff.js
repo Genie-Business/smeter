@@ -14,10 +14,12 @@ import {
   resetTariffSettings, savePaymentSettings, saveTariffSettings, tariffImpact, tariffSettingsDefaults, tariffSettingsSchema,
   geniSettingsDefaults, getGeniSettings, mergeGeniInput, publicGeniSettings, resetGeniSettings, saveGeniSettings,
 } from '../services/settings.js';
-import { GeniClient } from '../geni/client.js';
+import { asUpstream, GeniClient } from '../geni/client.js';
+import { geni, geniMode, refreshGeni } from '../geni/index.js';
+import { notify } from '../services/notifications.js';
 import { liveReading } from '../services/usage.js';
 import { landlordPurchaseDto } from '../services/vending.js';
-import { badRequest, conflict, notFound, unauthorized } from '../util/errors.js';
+import { badRequest, conflict, notFound, unauthorized, upstream } from '../util/errors.js';
 import { koboToNaira, pageParams, parse } from '../util/http.js';
 import { rateLimit } from '../util/rateLimit.js';
 import { landlordDto, meterDto } from './dto.js';
@@ -250,6 +252,62 @@ staffRoutes.get('/purchases', async (req, res) => {
   const rows = await db().all(`SELECT * FROM purchases WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, ...args, pageSize, offset);
   const { n } = await db().get(`SELECT COUNT(*) n FROM purchases WHERE ${where}`, ...args);
   res.json({ data: rows.map(landlordPurchaseDto), page, pageSize, total: n });
+});
+
+// ---- Clear-tamper tokens --------------------------------------------------------
+
+const tamperDto = (t) => ({
+  id: t.id,
+  meterId: t.meter_id,
+  token: t.token,
+  receiptId: t.receipt_id,
+  reason: t.reason,
+  by: t.staff_name ?? null,
+  createdAt: t.created_at,
+});
+
+// History, newest first; ?meterId= narrows it to one meter.
+staffRoutes.get('/tamper-tokens', async (req, res) => {
+  const meterId = typeof req.query.meterId === 'string' && req.query.meterId.trim() ? req.query.meterId.trim() : null;
+  const rows = await db().all(
+    `SELECT t.*, s.name AS staff_name FROM tamper_tokens t LEFT JOIN staff s ON s.id = t.staff_id
+     ${meterId ? 'WHERE t.meter_id = ?' : ''} ORDER BY t.id DESC LIMIT 100`,
+    ...(meterId ? [meterId] : []),
+  );
+  res.json({ data: rows.map(tamperDto) });
+});
+
+// Generate one on the head-end (account owners only). Works for any meter on
+// the head-end, whether or not it has been added to smeter.
+staffRoutes.post('/tamper-tokens', requireStaff({ role: 'owner' }), async (req, res) => {
+  const body = parse(z.object({
+    meterId: z.string().trim().regex(/^\d{6,20}$/, 'Enter the meter serial number'),
+    reason: z.string().trim().min(3, 'Say why the tamper alarm is being cleared').max(200),
+  }), req.body);
+  await refreshGeni();
+  if (config.isProduction && geniMode() !== 'live') {
+    throw upstream('The meter head-end isn’t connected, so tamper tokens can’t be generated right now.');
+  }
+  let minted;
+  try {
+    if (!(await geni().getMeter(body.meterId))) throw notFound('That meter isn’t on the metering platform. Check the number.');
+    minted = await geni().clearTamperToken(body.meterId);
+  } catch (err) {
+    throw asUpstream(err);
+  }
+  const row = await db().get(
+    `INSERT INTO tamper_tokens (meter_id, token, receipt_id, reason, staff_id) VALUES (?, ?, ?, ?, ?) RETURNING *`,
+    body.meterId, minted.token, minted.receiptId, body.reason, req.staff.id,
+  );
+  const meter = await db().get("SELECT landlord_id FROM meters WHERE meter_id = ? AND status != 'removed'", body.meterId);
+  if (meter) {
+    await notify({
+      recipientType: 'landlord', recipientId: meter.landlord_id, kind: 'tamper',
+      title: 'Tamper token issued',
+      body: `The smeter team issued a token to clear the tamper alarm on meter ${body.meterId}. Enter it on the meter to clear the alarm.`,
+    });
+  }
+  res.status(201).json({ tamperToken: tamperDto({ ...row, staff_name: req.staff.name }) });
 });
 
 // ---- Leads & sign-ups ---------------------------------------------------------------

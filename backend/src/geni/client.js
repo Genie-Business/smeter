@@ -180,6 +180,13 @@ export class GeniClient {
     };
   }
 
+  /** A clear-tamper token: keyed into the meter, it clears its tamper alarm. */
+  async clearTamperToken(meterId) {
+    const r = await this.raw('/API/Token/ClearTamperToken/Generate', this.base({ meterId }));
+    if (!r?.token) throw new GeniError('Tamper token generation returned no token');
+    return { token: String(r.token).replace(/\D/g, ''), receiptId: r.receiptId == null ? null : String(r.receiptId) };
+  }
+
   /** Receipt id of the credit-token record for this meter + token, or null (never throws). */
   async findReceiptId({ meterId, token }) {
     const digits = (t) => String(t).replace(/\D/g, '');

@@ -245,6 +245,18 @@ CREATE TABLE IF NOT EXISTS notify_requests (
   created_at  TEXT NOT NULL DEFAULT ${NOW},
   UNIQUE (contact, platform)
 );
+
+-- Clear-tamper tokens generated from the admin dashboard (audit trail).
+CREATE TABLE IF NOT EXISTS tamper_tokens (
+  ${ID},
+  meter_id    TEXT NOT NULL,
+  token       TEXT NOT NULL,
+  receipt_id  TEXT,
+  reason      TEXT NOT NULL,
+  staff_id    INTEGER REFERENCES staff(id),
+  created_at  TEXT NOT NULL DEFAULT ${NOW}
+);
+CREATE INDEX IF NOT EXISTS tamper_tokens_meter ON tamper_tokens(meter_id);
 `;
 
 const INT8 = 20;

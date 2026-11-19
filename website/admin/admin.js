@@ -95,6 +95,7 @@ const I = {
   team: '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11a3 3 0 1 0 0-6M21 20c0-2.6-1.7-4.8-4-5.6"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
   card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/>',
 };
 const icon = (name) => raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${I[name]}</svg>`);
@@ -108,6 +109,7 @@ const routes = [
   [/^#\/meters$/, metersList],
   [/^#\/meters\/([\w-]+)$/, meterDetail],
   [/^#\/purchases$/, purchasesList],
+  [/^#\/tamper-tokens(?:\?meter=(\d+))?$/, tamperTokens],
   [/^#\/leads$/, leadsList],
   [/^#\/signups$/, signupsList],
   [/^#\/content\/(site|app)$/, contentEditor],
@@ -179,6 +181,7 @@ function shell(hash) {
           ${link('#/owners', 'owners', 'Property owners')}
           ${link('#/meters', 'meters', 'Meters')}
           ${link('#/purchases', 'purchases', 'Purchases')}
+          ${link('#/tamper-tokens', 'shield', 'Tamper tokens')}
           <div class="group">Growth</div>
           ${link('#/leads', 'leads', 'Owner leads', attention?.newLeads)}
           ${link('#/signups', 'signups', 'App sign-ups')}
@@ -385,9 +388,13 @@ async function metersList(main, _x, state = { page: 1, search: '', mode: '', sta
 }
 
 async function meterDetail(main, meterId) {
-  const r = await api(`/meters/${encodeURIComponent(meterId)}`);
+  const [r, t] = await Promise.all([
+    api(`/meters/${encodeURIComponent(meterId)}`),
+    api(`/tamper-tokens?meterId=${encodeURIComponent(meterId)}`),
+  ]);
   const m = r.meter;
   const live = r.live;
+  const tamper = t.data;
   render(main, html`
     <a class="crumb" href="#/meters">← Meters</a>
     <div class="page-head"><div><h1 class="mono" style="font-size:24px">${m.meterId}</h1><p>${m.address}${m.apartment ? `, Apt ${m.apartment}` : ''}</p></div>
@@ -403,10 +410,63 @@ async function meterDetail(main, meterId) {
         <dt>Connection</dt><dd>${live.online ? html`<span class="pill ok">Online</span>` : html`<span class="pill warn">Offline</span>`}</dd>
         <dt>Last seen</dt><dd>${dateTime(live.lastSeen)}</dd><dt>Voltage</dt><dd>${live.volts == null ? '-' : live.volts.toFixed(0) + ' V'}</dd>
         <dt>Current</dt><dd>${live.amps == null ? '-' : live.amps.toFixed(1) + ' A'}</dd><dt>Load</dt><dd>${live.kw == null ? '-' : live.kw.toFixed(2) + ' kW'}</dd>
-        <dt>Supply</dt><dd>${humanize(m.relayState)}</dd></dl>` : html`<p class="muted">Couldn’t reach the meter head-end.</p>`}</div>
+        <dt>Supply</dt><dd>${humanize(m.relayState)}</dd>
+        <dt>Meter reports</dt><dd>${live.alarms?.length ? live.alarms.join(' · ') : '-'}</dd></dl>` : html`<p class="muted">Couldn’t reach the meter head-end.</p>`}</div>
     </div>
+    <div class="card" style="margin-top:14px"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px"><h2 style="margin:0">Tamper alarm</h2><p class="muted" style="margin:4px 0 0">${tamper.length ? html`Last tamper token: <span class="mono">${fmtToken(tamper[0].token)}</span>, ${dateTime(tamper[0].createdAt)} by ${tamper[0].by || 'unknown'}` : 'No tamper tokens generated for this meter yet.'}</p></div>
+      ${me.role === 'owner' ? html`<a class="btn" href="#/tamper-tokens?meter=${m.meterId}">${icon('shield')} Generate tamper token</a>` : ''}
+    </div></div>
     <h2 style="margin:22px 0 10px;font-size:17px">Purchases</h2>
     <div class="table-wrap"><table><thead>${purchaseHead(false)}</thead><tbody>${purchaseRows(r.purchases, { showMeter: false })}</tbody></table></div>`);
+}
+
+// Clear-tamper tokens
+const fmtToken = (t) => String(t ?? '').replace(/(\d{4})(?=\d)/g, '$1 ');
+
+async function tamperTokens(main, prefill = '') {
+  const r = await api('/tamper-tokens');
+  const canMake = me.role === 'owner';
+  render(main, html`
+    <div class="page-head"><div><h1>Tamper tokens</h1><p>A clear-tamper token switches off a meter's tamper alarm (for example after its cover was opened) once it is keyed in on the meter.</p></div></div>
+    <div class="grid g2" style="align-items:start">
+      ${canMake ? html`<form class="card" id="tt" novalidate><h2>Generate a token</h2>
+        <div id="tt-err"></div>
+        <div class="field"><label for="tt-meter">Meter number</label><input class="input mono" id="tt-meter" inputmode="numeric" autocomplete="off" required value="${prefill || ''}"><div class="hint" style="margin:4px 0 0">Any meter on the metering platform, whether or not it's been added to smeter.</div></div>
+        <div class="field"><label for="tt-reason">Reason</label><input class="input" id="tt-reason" maxlength="200" required placeholder="e.g. Cover opened during installation"></div>
+        <button class="btn primary" type="submit">${icon('shield')} Generate tamper token</button>
+        <div id="tt-out"></div></form>`
+        : html`<div class="card"><p class="muted">Only account owners can generate tamper tokens.</p></div>`}
+      <div class="table-wrap"><table><thead><tr><th>Meter</th><th>Token</th><th>Reason</th><th>By</th><th>When</th></tr></thead>
+        <tbody>${r.data.length ? r.data.map((t) => html`<tr><td class="mono"><a href="#/meters/${t.meterId}">${t.meterId}</a></td><td class="mono">${fmtToken(t.token)}</td><td>${t.reason}</td><td>${t.by || '-'}</td><td>${dateTime(t.createdAt)}</td></tr>`)
+          : html`<tr><td colspan="5" class="muted">No tamper tokens yet.</td></tr>`}</tbody></table></div>
+    </div>`);
+  const form = main.querySelector('#tt');
+  if (!form) return;
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const meterId = form.querySelector('#tt-meter').value.trim();
+    const reason = form.querySelector('#tt-reason').value.trim();
+    render(main.querySelector('#tt-err'), html``);
+    if (!confirm(`Generate a clear-tamper token for meter ${meterId}?`)) return;
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const { tamperToken: t } = await api('/tamper-tokens', { method: 'POST', body: { meterId, reason } });
+      await tamperTokens(main);
+      render(main.querySelector('#tt-out') ?? main, html`<div class="card" style="margin-top:14px;background:var(--brand-soft, #eef4ff)">
+        <div class="muted">Clear-tamper token for meter <b class="mono">${t.meterId}</b></div>
+        <div class="mono" style="font-size:24px;letter-spacing:1px;margin:8px 0">${fmtToken(t.token)}</div>
+        <button class="btn" type="button" id="tt-copy">Copy token</button>
+        <p class="muted" style="margin:8px 0 0">Key it in on the meter (or its remote) to clear the tamper alarm.</p></div>`);
+      const copy = main.querySelector('#tt-copy');
+      if (copy) copy.onclick = async () => { await navigator.clipboard.writeText(t.token); toast('Token copied'); };
+      toast('Tamper token generated');
+    } catch (err) {
+      btn.disabled = false;
+      render(main.querySelector('#tt-err'), html`<div class="err-box">${err.message}</div>`);
+    }
+  };
 }
 
 // Purchases
