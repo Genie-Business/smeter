@@ -3,6 +3,20 @@ import { tariffNow } from '../services/settings.js';
 import { koboToNaira } from '../util/http.js';
 import { maskPhone } from '../util/phone.js';
 
+// What an owner must set up before adding meters: tenants' power money settles
+// to their payout account (Paystack subaccount), so without one it would land in
+// the company account.
+const SETUP_STEPS = [
+  { key: 'address', label: 'your address', done: (l) => Boolean(l.address?.trim()) },
+  { key: 'unitPrice', label: 'your price per kWh', done: (l) => Number(l.unit_price_kobo) > 0 },
+  { key: 'payoutAccount', label: 'a verified payout bank account', done: (l) => Boolean(l.bank_verified_at && l.settlement_ref) },
+];
+
+export function ownerSetup(l) {
+  const missing = SETUP_STEPS.filter((s) => !s.done(l)).map(({ key, label }) => ({ key, label }));
+  return { complete: missing.length === 0, missing };
+}
+
 export function landlordDto(l) {
   return {
     id: l.id,
@@ -24,6 +38,7 @@ export function landlordDto(l) {
     unitPrice: koboToNaira(l.unit_price_kobo),
     feeBearer: l.fee_bearer,
     payoutSchedule: l.payout_schedule ?? 'daily',
+    setup: ownerSetup(l),
     tariffLimits: {
       max: tariffNow().maxUnitPriceNaira,
       baseCost: tariffNow().baseUnitCostNaira,

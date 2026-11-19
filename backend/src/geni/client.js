@@ -2,6 +2,7 @@
 // returning { code, reason, result }; auth is a bearer JWT from /API/User/Login.
 import { config } from '../config.js';
 import { upstream } from '../util/errors.js';
+import { headEndTime } from './parse.js';
 
 export class GeniError extends Error {
   constructor(message, { status, code, path } = {}) {
@@ -231,13 +232,14 @@ export class GeniClient {
   async onlineStatus(meterId) {
     const result = await this.raw('/API/GPRSOnlineStatus/View', this.base({ meterId }));
     // The head-end returns the meter's connect/disconnect history; the latest row is the current state.
-    const stamp = (r) => Date.parse(String(r.statusUpdateDate ?? '').replace(' ', 'T')) || 0;
+    const stamp = (r) => headEndTime(r.statusUpdateDate).getTime() || 0;
     const row = (Array.isArray(result) ? result : [result])
       .filter((r) => r && String(r.meterId) === String(meterId))
       .sort((a, b) => stamp(b) - stamp(a))[0];
     if (!row) return { online: false, lastSeen: null };
     const online = row.isOnline === true || row.isOnline === 'true' || row.isOnline === 1;
-    return { online, lastSeen: row.statusUpdateDate ?? null };
+    const seen = row.statusUpdateDate ? headEndTime(row.statusUpdateDate) : null;
+    return { online, lastSeen: seen && !Number.isNaN(seen.getTime()) ? seen.toISOString() : null };
   }
 
   async curve(path, args, budget = { splits: MAX_SPLITS }) {

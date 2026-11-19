@@ -387,6 +387,35 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
       _prefilled = true;
       if (_address.text.isEmpty && (owner.address ?? '').isNotEmpty) _address.text = owner.address!;
     }
+    // Meters can only be added once the owner's address, price and payout account
+    // are set: tenants' power money settles to that account.
+    if (owner != null && !owner.setupComplete) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Add a meter')),
+        body: ListView(children: [
+          EmptyState(
+            icon: Icons.checklist_rounded,
+            title: 'Finish setting up first',
+            message: 'Tenants pay for power into your payout account, so add these before adding a meter.',
+          ),
+          for (final (key, label, route) in const [
+            ('address', 'Add your property address', '/landlord/profile/edit'),
+            ('unitPrice', 'Set your price per unit', '/landlord/unit-price'),
+            ('payoutAccount', 'Add and verify a payout bank account', '/landlord/payout'),
+          ])
+            if (owner.setupMissing.contains(key))
+              ListTile(
+                leading: const Icon(Icons.radio_button_unchecked_rounded, color: SmeterColors.muted),
+                title: Text(label, style: SmeterText.bodyStrong()),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () async {
+                  await context.push(route);
+                  ref.invalidate(landlordProfileProvider);
+                },
+              ),
+        ]),
+      );
+    }
     final check = _checkedId == _meter.text.trim() ? _check : null;
     return Scaffold(
       appBar: AppBar(title: const Text('Add a meter')),

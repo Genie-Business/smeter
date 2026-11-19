@@ -17,7 +17,7 @@ import { createPurchase, getPurchase, landlordPurchaseDto, settlePayment, vend }
 import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
 import { koboToNaira, nairaToKobo, pageParams, parse } from '../util/http.js';
 import { normalizePhone } from '../util/phone.js';
-import { landlordDto, meterDto } from './dto.js';
+import { landlordDto, meterDto, ownerSetup } from './dto.js';
 
 export const landlordRoutes = Router();
 landlordRoutes.use(requireLandlord());
@@ -296,7 +296,17 @@ const meterBody = z.object({
   servicePayer: z.enum(SERVICE_PAYERS).optional().default('owner'),
 });
 
+/** Refuse to add meters until the owner's address, price and payout account are set. */
+function requireSetup(landlord) {
+  const { complete, missing } = ownerSetup(landlord);
+  if (complete) return;
+  const list = missing.map((m) => m.label);
+  const text = list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list.at(-1)}` : list[0];
+  throw conflict(`Finish setting up your account before adding meters: add ${text}.`, { missing });
+}
+
 landlordRoutes.post('/meters', async (req, res) => {
+  requireSetup(req.landlord);
   const body = parse(meterBody, req.body);
   const tenantPhone = normalizePhone(body.tenantPhone);
   if (!tenantPhone) throw badRequest("Enter the tenant's phone number", { tenantPhone: 'Invalid phone number' });

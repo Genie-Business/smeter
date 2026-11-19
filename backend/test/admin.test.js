@@ -1,7 +1,7 @@
 // Admin dashboard API, content management and website endpoints.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { startServer } from './helpers.js';
+import { completeOwnerSetup, startServer } from './helpers.js';
 
 const { db } = await import('../src/db.js');
 const { hashPassword } = await import('../src/auth/password.js');
@@ -25,7 +25,7 @@ async function seedOperationalData() {
     body: { fullName: 'Ada Lovelace', email: 'ada@example.com', phone: '08035550000', password: 'correct-horse' },
   });
   const t = reg.body.token;
-  await api.call('PUT', '/v1/landlord/tariff', { token: t, body: { unitPrice: 230 } });
+  await completeOwnerSetup(api, t, { unitPrice: 230 });
   await api.call('POST', '/v1/landlord/meters', {
     token: t,
     body: { meterId: '47009990001', address: '3 Allen Ave, Ikeja', apartment: '4', tenantPhone: '08036660000', tenantEmail: 'tenant4@example.com', deliveryMode: 'manual' },

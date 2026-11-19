@@ -61,14 +61,14 @@ export function parseCurveRow(row) {
   return { at: headEndTime(row.currentDate ?? row.createDate), values, texts };
 }
 
-/**
- * Head-end timestamps look like "2026-11-18 10:00:00" with no zone. They are
- * UTC (the hourly reading for 11:00 appears at 11:03 UTC), so read them as UTC
- * rather than in the server's local zone.
- */
+// Zone of the head-end's timestamps ("2026-11-19 11:51:11" carries none). They
+// are West Africa Time: a token minted at 10:51 UTC is recorded as 11:51.
+const HEAD_END_UTC_OFFSET = process.env.GENI_TIME_OFFSET || '+01:00';
+
+/** Read a head-end timestamp, which has no zone, as West Africa Time. */
 export function headEndTime(value) {
   const s = String(value ?? '').trim();
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) return new Date(`${s.replace(' ', 'T')}Z`);
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) return new Date(`${s.replace(' ', 'T')}${HEAD_END_UTC_OFFSET}`);
   return new Date(s);
 }
 

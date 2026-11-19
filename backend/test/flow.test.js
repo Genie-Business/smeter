@@ -2,7 +2,7 @@
 // → STS token vended + delivered, plus the main unhappy paths.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { startServer } from './helpers.js';
+import { completeOwnerSetup, startServer } from './helpers.js';
 
 const { geni } = await import('../src/geni/index.js');
 const { settlePayment } = await import('../src/services/vending.js');
@@ -65,6 +65,24 @@ test('tariff respects the regulatory cap and base cost', async () => {
   const ok = await api.call('PUT', '/v1/landlord/tariff', { token: landlordToken, body: { unitPrice: 230 } });
   assert.equal(ok.status, 200, ok.text);
   assert.equal(ok.body.landlord.unitPrice, 230);
+});
+
+test('owners must finish setting up (address, price, payout account) before adding meters', async () => {
+  const me = await api.call('GET', '/v1/landlord/me', { token: landlordToken });
+  assert.deepEqual(me.body.landlord.setup, {
+    complete: false,
+    missing: [{ key: 'address', label: 'your address' }, { key: 'payoutAccount', label: 'a verified payout bank account' }],
+  });
+  const blocked = await api.call('POST', '/v1/landlord/meters', {
+    token: landlordToken,
+    body: { meterId: METER, address: '12 Admiralty Way, Lekki', tenantPhone: '08021234567', tenantEmail: 'tenant@example.com' },
+  });
+  assert.equal(blocked.status, 409);
+  assert.match(blocked.body.error.message, /your address and a verified payout bank account/);
+  assert.deepEqual(blocked.body.error.details.missing.map((m) => m.key), ['address', 'payoutAccount']);
+
+  const owner = await completeOwnerSetup(api, landlordToken);
+  assert.deepEqual(owner.setup, { complete: true, missing: [] });
 });
 
 test('meter binding validates the hardware id and prevents double assignment', async () => {
@@ -248,6 +266,21 @@ test('payout account: name check + OTP before saving', async () => {
   assert.equal(confirm.status, 200, confirm.text);
   assert.equal(confirm.body.landlord.bank.verified, true);
   assert.equal(confirm.body.landlord.bank.settlementActive, true);
+});
+
+test('no power purchase while the owner has no payout account, so the money never lands in the company account', async () => {
+  const { settlement_ref: ref } = await db().get('SELECT settlement_ref FROM landlords WHERE email = ?', 'gabriel@example.com');
+  await db().run('UPDATE landlords SET settlement_ref = NULL WHERE email = ?', 'gabriel@example.com');
+  try {
+    const tenantTry = await api.call('POST', '/v1/tenant/purchases', { token: tenantToken, body: { amount: 1000 } });
+    assert.equal(tenantTry.status, 409);
+    assert.match(tenantTry.body.error.message, /property owner hasn’t finished setting up payments/);
+    const ownerTry = await api.call('POST', '/v1/landlord/purchases', { token: landlordToken, body: { meterId: METER, amount: 1000 } });
+    assert.equal(ownerTry.status, 409);
+    assert.match(ownerTry.body.error.message, /payout bank account/);
+  } finally {
+    await db().run('UPDATE landlords SET settlement_ref = ? WHERE email = ?', ref, 'gabriel@example.com');
+  }
 });
 
 test('dashboard, ledger and kill-switch', async () => {
@@ -455,6 +488,7 @@ test('new owners get a tariff id from the configured prefix; stored ids keep wor
     });
     assert.equal(reg.status, 201, reg.text);
     const token = reg.body.token;
+    await completeOwnerSetup(api, token);
     const add = await api.call('POST', '/v1/landlord/meters', {
       token,
       body: { meterId: '47001234571', address: '1 Prefix Road, Yaba', tenantPhone: '08025550001', tenantEmail: 'p1@example.com', deliveryMode: 'manual' },

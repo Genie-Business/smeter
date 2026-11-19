@@ -11,6 +11,6 @@ export const badRequest = (message, details) => new AppError(400, 'bad_request',
 export const unauthorized = (message = 'Authentication required') => new AppError(401, 'unauthorized', message);
 export const forbidden = (message = 'Not allowed') => new AppError(403, 'forbidden', message);
 export const notFound = (message = 'Not found') => new AppError(404, 'not_found', message);
-export const conflict = (message) => new AppError(409, 'conflict', message);
+export const conflict = (message, details) => new AppError(409, 'conflict', message, details);
 export const tooMany = (message = 'Too many requests, try again shortly') => new AppError(429, 'rate_limited', message);
 export const upstream = (message, details) => new AppError(502, 'upstream_error', message, details);

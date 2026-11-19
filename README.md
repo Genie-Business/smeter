@@ -199,7 +199,7 @@ Paystack webhook settle payments as they happen either way.
 
 What the real head-end does (checked against it and its console, Nov 2026; the
 API collection only documents placeholders):
-1. Success is `code` 0. Timestamps like `2026-11-18 10:00:00` are UTC.
+1. Success is `code` 0. Timestamps like `2026-11-18 10:00:00` carry no zone and are West Africa Time (UTC+1; `GENI_TIME_OFFSET`).
 2. `LoadProfile/*` rows are a comma-separated `headline` plus `data`. The first cell is
    the meter status text (`Relay Status; Terminal cover open;`), so data is split on the
    headline's separator, not on `;`. Three-phase meters report each phase (voltage,

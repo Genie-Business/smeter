@@ -48,7 +48,7 @@ test('real three-phase instantaneous row: status text keeps its semicolons, phas
       + 'Phase-N Current,Phase-A Active Power,Phase-B Active Power,Phase-C Active Power,Phase-A Reverse Active Power',
     data: 'Relay Status; Terminal cover open; ,0.0,0.0,232.4,0.000,0.000,1.250,1.249,0,0,280,5',
   });
-  assert.equal(r.at.toISOString(), '2026-11-18T10:00:00.000Z'); // head-end times are UTC
+  assert.equal(r.at.toISOString(), '2026-11-18T09:00:00.000Z'); // head-end times are WAT (UTC+1)
   assert.equal(r.values['Phase-C Voltage'], 232.4);
   assert.deepEqual(statusFlags(r.texts), ['Relay Status', 'Terminal cover open']);
   assert.deepEqual(liveFigures(r.values), { volts: 232.4, amps: 1.25, kw: 0.28, meterBalanceKwh: null });

@@ -190,7 +190,11 @@ class Landlord {
       baseCost = _d((j['tariffLimits'] as Map?)?['baseCost']) ?? 0,
       gprsFeeSinglePhase = _d((j['tariffLimits'] as Map?)?['gprsFeeSinglePhase']) ?? 0,
       gprsFeeThreePhase = _d((j['tariffLimits'] as Map?)?['gprsFeeThreePhase']) ?? 0,
-      payoutSchedule = j['payoutSchedule'] as String? ?? 'daily';
+      payoutSchedule = j['payoutSchedule'] as String? ?? 'daily',
+      setupMissing = [
+        for (final m in ((j['setup'] as Map?)?['missing'] as List? ?? const []))
+          (m as Map)['key'].toString(),
+      ];
 
   final int id;
   final String fullName;
@@ -210,6 +214,10 @@ class Landlord {
 
   /// How often earnings are paid out: daily | weekly | monthly.
   final String payoutSchedule;
+
+  /// Setup steps still to do before meters can be added: address, unitPrice, payoutAccount.
+  final List<String> setupMissing;
+  bool get setupComplete => setupMissing.isEmpty;
 }
 
 class Meter {

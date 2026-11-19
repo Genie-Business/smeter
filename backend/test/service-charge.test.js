@@ -2,7 +2,7 @@
 // next purchase) and per purchase, plus switching between them.
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
-import { startServer } from './helpers.js';
+import { completeOwnerSetup, startServer } from './helpers.js';
 
 const { db } = await import('../src/db.js');
 const { saveTariffSettings } = await import('../src/services/settings.js');
@@ -43,7 +43,7 @@ test('setup: owner, GPRS meter (owner pays by default), tenant', async () => {
     body: { fullName: 'Service Owner', email: 'svc@example.com', phone: '08035550001', password: 'correct-horse' },
   });
   owner = reg.body.token;
-  assert.equal((await api.call('PUT', '/v1/landlord/tariff', { token: owner, body: { unitPrice: 230 } })).status, 200);
+  await completeOwnerSetup(api, owner, { unitPrice: 230 });
   const add = await api.call('POST', '/v1/landlord/meters', {
     token: owner,
     body: { meterId: METER, address: '3 Service Road, Lekki', tenantPhone: '08025550001', tenantEmail: 'svc-tenant@example.com' },

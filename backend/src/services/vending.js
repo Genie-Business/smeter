@@ -94,6 +94,13 @@ export async function createPurchase({ meter, landlord, amountKobo, initiatedBy,
   if (meter.status !== 'active' && initiatedBy === 'tenant') throw badRequest('This meter is not active yet');
   // Never take real money for tokens from the simulated head-end.
   await requireLiveHeadEnd();
+  // The power money settles to the owner's payout account; without one it would
+  // all land in the company account.
+  if (!landlord.settlement_ref) {
+    throw conflict(initiatedBy === 'landlord'
+      ? 'Add and verify your payout bank account before buying units.'
+      : 'Your property owner hasn’t finished setting up payments for this meter yet. Please ask them to add their payout bank account.');
+  }
   const params = await paymentParams();
   if (channel && !params.channels.includes(channel)) {
     throw badRequest('That payment method isn’t available right now. Choose another one.');

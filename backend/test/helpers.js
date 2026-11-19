@@ -76,3 +76,22 @@ export async function startServer() {
 
   return { base, call, close };
 }
+
+/**
+ * Give an owner everything they need before adding meters: an address, a unit
+ * price and a verified payout account (the mock bank resolves 0123456789).
+ */
+export async function completeOwnerSetup(api, token, { unitPrice = 230, address = '1 Owner Street, Lagos' } = {}) {
+  resetRateLimits(); // the payout account step sends an OTP
+  const steps = [
+    await api.call('PATCH', '/v1/landlord/me', { token, body: { address } }),
+    await api.call('PUT', '/v1/landlord/tariff', { token, body: { unitPrice } }),
+  ];
+  const req = await api.call('POST', '/v1/landlord/bank/request', {
+    token, body: { bankCode: '044', bankName: 'Access Bank', accountNumber: '0123456789' },
+  });
+  steps.push(req, await api.call('POST', '/v1/landlord/bank/confirm', { token, body: { code: req.body?.devCode } }));
+  const failed = steps.find((r) => r.status !== 200);
+  if (failed) throw new Error(`owner setup failed: ${failed.status} ${failed.text}`);
+  return steps.at(-1).body.landlord;
+}

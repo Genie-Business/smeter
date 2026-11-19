@@ -56,7 +56,8 @@ test('onlineStatus uses the latest history row whatever the order', async () => 
     { meterId: '999', isOnline: false, statusUpdateDate: '2026-11-17 18:00:00' },
     { meterId: '473', isOnline: false, statusUpdateDate: '2026-10-13 13:46:31' },
   ];
-  assert.deepEqual(await rows(hist).onlineStatus('473'), { online: true, lastSeen: '2026-11-17 17:08:54' });
+  // Head-end times are WAT (UTC+1).
+  assert.deepEqual(await rows(hist).onlineStatus('473'), { online: true, lastSeen: '2026-11-17T16:08:54.000Z' });
   assert.equal((await rows([...hist].reverse()).onlineStatus('473')).online, true);
   assert.equal((await rows([]).onlineStatus('473')).online, false);
 });

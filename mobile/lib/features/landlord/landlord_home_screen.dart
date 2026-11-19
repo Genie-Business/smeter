@@ -147,9 +147,9 @@ class _SetupChecklist extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final steps = [
-      ('Add your property address', (d.landlord.address ?? '').trim().isNotEmpty, '/landlord/profile/edit'),
-      ('Set your price per unit', d.landlord.unitPrice > 0, '/landlord/unit-price'),
-      ('Add a payout bank account and schedule', d.landlord.bank != null, '/landlord/payout'),
+      ('Add your property address', !d.landlord.setupMissing.contains('address'), '/landlord/profile/edit'),
+      ('Set your price per unit', !d.landlord.setupMissing.contains('unitPrice'), '/landlord/unit-price'),
+      ('Add and verify a payout bank account', !d.landlord.setupMissing.contains('payoutAccount'), '/landlord/payout'),
       ('Add your first meter', d.meterCount > 0, '/landlord/meters/add'),
     ];
     final done = steps.where((s) => s.$2).length;
