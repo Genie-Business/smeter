@@ -36,8 +36,9 @@ test('quote: debt recovery, units and tenant-borne fee', () => {
   assert.equal(q.energyKobo, 180000);
   assert.equal(q.units, 7.82); // 1800 / 230, floored
   assert.equal(q.totalKobo - q.feeKobo, 200000);
-  assert.equal(q.landlordNetKobo, q.debtKobo + q.markupKobo);
-  assert.equal(q.platformShareKobo, q.baseKobo + q.feeKobo);
+  // All the power money (and the debt recovered) goes to the owner; the platform keeps the fee.
+  assert.equal(q.landlordNetKobo, q.debtKobo + q.energyKobo);
+  assert.equal(q.platformShareKobo, q.feeKobo);
 });
 
 test('quote: debt recovery never exceeds what is owed', () => {
@@ -45,11 +46,11 @@ test('quote: debt recovery never exceeds what is owed', () => {
   assert.equal(q.debtKobo, 3000);
 });
 
-test('quote: landlord-borne fee that would make payout negative is blocked', () => {
-  assert.throws(
-    () => quote({ amountKobo: 100000, unitPriceKobo: 20950, baseCostKobo: 20950, feeBearer: 'landlord' }, P),
-    /cannot be processed/,
-  );
+test("quote: a landlord-borne fee comes out of the owner's share", () => {
+  const q = quote({ amountKobo: 100000, unitPriceKobo: 20950, baseCostKobo: 20950, feeBearer: 'landlord' }, P);
+  assert.equal(q.totalKobo, 100000);
+  assert.equal(q.landlordNetKobo, 100000 - q.feeKobo);
+  assert.equal(q.platformShareKobo, 0);
 });
 
 test('quote: rejects missing price and out-of-range amounts', () => {
@@ -65,8 +66,8 @@ test('service: the owner pays from their share, the rest stays due', () => {
   const plain = quote({ ...BASE, feeBearer: 'tenant' }, P);
   const q = quote({ ...BASE, feeBearer: 'tenant', service: { ...SVC, payer: 'owner', ownerDueKobo: 150000 } }, P);
   assert.equal(q.totalKobo, plain.totalKobo); // the tenant pays nothing extra
-  assert.equal(q.serviceOwnerKobo, plain.landlordNetKobo); // ₦447.57 markup < ₦1,500 due: all of it
-  assert.equal(q.landlordNetKobo, 0);
+  assert.equal(q.serviceOwnerKobo, 150000); // the whole ₦1,500 comes out of the owner's ₦5,000
+  assert.equal(q.landlordNetKobo, plain.landlordNetKobo - 150000);
   assert.equal(q.platformShareKobo, plain.platformShareKobo + q.serviceOwnerKobo);
   assert.equal(q.serviceTenantKobo, 0);
 });
@@ -78,7 +79,7 @@ test('service: the tenant monthly balance is added on top', () => {
   assert.equal(q.serviceTenantKobo, 150000);
   assert.equal(q.totalKobo - q.feeKobo, 500000 + 150000);
   assert.equal(q.landlordNetKobo, plain.landlordNetKobo); // owner unaffected
-  assert.equal(q.platformShareKobo, q.baseKobo + q.feeKobo + 150000);
+  assert.equal(q.platformShareKobo, q.feeKobo + 150000);
 });
 
 test('service: per purchase charges the days the units should last', () => {

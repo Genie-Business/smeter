@@ -547,6 +547,8 @@ landlordRoutes.get('/ledger', async (req, res) => {
     purchases: r.purchases,
     units: Math.round((r.units ?? 0) * 100) / 100,
     collected: koboToNaira(r.collected ?? 0),
+    powerSales: koboToNaira(r.energy ?? 0),
+    // The owner pays the utility themselves: an estimate of that bill and their margin over it.
     baseUtilityCost: koboToNaira(r.base ?? 0),
     markup: koboToNaira((r.energy ?? 0) - (r.base ?? 0)),
     debtRecovered: koboToNaira(r.debt ?? 0),

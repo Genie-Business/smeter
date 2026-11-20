@@ -3,15 +3,16 @@
 //   amount  = value the buyer picked
 //   debt    = landlord debt recovery (percent of amount, capped at outstanding)
 //   energy  = amount - debt → vended as units at the landlord's price per kWh
-//   base    = units × base utility cost  (platform pays the utility)
-//   markup  = energy - base              (landlord's margin)
+//   base    = units × base utility cost  (for reporting: the owner pays the utility)
+//   markup  = energy - base              (owner's margin over that cost)
 //   fee     = gateway fee, borne by tenant (added on top) or landlord (deducted)
 //
 //   service = GPRS service charge (see services/service-charge.js): added on
 //             top for the tenant, or taken from the owner's share
 //
-// The landlord settles debt + markup (- fee when they bear it, - their service
-// charge). The platform keeps base + service (+ fee when the tenant bears it).
+// All the power money goes to the owner: they settle energy + debt (- fee when
+// they bear it, - their service charge). The platform keeps only the service
+// charge (+ the gateway fee when the tenant bears it).
 import { config } from '../config.js';
 import { badRequest, conflict } from '../util/errors.js';
 
@@ -70,13 +71,13 @@ export function quote({ amountKobo, unitPriceKobo, baseCostKobo, feeBearer, debt
   if (feeBearer === 'landlord') {
     total = charged;
     fee = gatewayFee(total, p);
-    landlordNet = debt + markup - fee;
-    platformShare = base + svc.tenantKobo; // subaccount bears the gateway fee
+    landlordNet = energy + debt - fee;
+    platformShare = svc.tenantKobo; // subaccount bears the gateway fee
   } else {
     total = grossUp(charged, p);
     fee = total - charged;
-    landlordNet = debt + markup;
-    platformShare = base + svc.tenantKobo + fee; // main account bears the gateway fee
+    landlordNet = energy + debt;
+    platformShare = svc.tenantKobo + fee; // main account bears the gateway fee
   }
   if (landlordNet < 0) {
     throw conflict('This purchase cannot be processed at the current unit price. Please contact your landlord.');

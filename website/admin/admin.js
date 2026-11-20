@@ -956,7 +956,7 @@ async function paymentSettings(main) {
 // Unit price limits
 const TARIFF_FIELDS = [
   ['maxUnitPriceNaira', 'Maximum price per kWh', 'The highest price an owner can charge (the regulated cap).'],
-  ['baseUnitCostNaira', 'Utility cost per kWh', 'What smeter pays the utility for each kWh. Owners can’t price below it; the difference is their margin.'],
+  ['baseUnitCostNaira', 'Utility cost per kWh', 'What an owner pays the utility for each kWh. Owners can’t price below it; the difference is their margin. All power money settles to the owner.'],
 ];
 // GPRS service charge: keeps automatic-delivery meters online. The owner picks
 // who pays it (owner, tenant monthly, or per purchase) for each meter.

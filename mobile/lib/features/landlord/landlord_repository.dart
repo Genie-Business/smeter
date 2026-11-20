@@ -45,6 +45,7 @@ class LedgerLine {
       purchases = j['purchases'] as int? ?? 0,
       units = (j['units'] as num? ?? 0).toDouble(),
       collected = (j['collected'] as num? ?? 0).toDouble(),
+      powerSales = (j['powerSales'] as num? ?? 0).toDouble(),
       baseUtilityCost = (j['baseUtilityCost'] as num? ?? 0).toDouble(),
       markup = (j['markup'] as num? ?? 0).toDouble(),
       debtRecovered = (j['debtRecovered'] as num? ?? 0).toDouble(),
@@ -55,6 +56,7 @@ class LedgerLine {
   final int purchases;
   final double units;
   final double collected;
+  final double powerSales;
   final double baseUtilityCost;
   final double markup;
   final double debtRecovered;

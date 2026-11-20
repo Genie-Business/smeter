@@ -695,10 +695,13 @@ class _LedgerCard extends StatelessWidget {
           const SizedBox(height: Space.sm),
           const Divider(),
           KeyValueRow('Collected', naira(line.collected)),
-          KeyValueRow('Utility cost', '− ${naira(line.baseUtilityCost)}'),
-          KeyValueRow('Your markup', naira(line.markup), valueColor: SmeterColors.success),
+          KeyValueRow('Power sales', naira(line.powerSales)),
           if (line.debtRecovered > 0) KeyValueRow('Debt recovered', naira(line.debtRecovered)),
           KeyValueRow('Payment fees', naira(line.fees)),
+          KeyValueRow('Paid to your account', naira(line.net), valueColor: SmeterColors.success),
+          const SizedBox(height: Space.sm),
+          Text('Your utility bill for these units is about ${naira(line.baseUtilityCost)}, '
+              'leaving you a margin of ${naira(line.markup)}.', style: SmeterText.caption()),
         ]),
       ),
     );

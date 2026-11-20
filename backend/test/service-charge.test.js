@@ -66,20 +66,21 @@ test('owner pays: billed monthly, taken from their share, the rest carried over'
   const n = await api.call('GET', '/v1/landlord/notifications', { token: owner });
   assert.ok(n.body.data.some((x) => x.title === 'Meter service charge'));
 
-  const { quote, purchase } = await buy(5000);
+  // The owner's ₦1,000 share of this purchase is less than the ₦1,500 due: all of it goes.
+  const { quote, purchase } = await buy(1000);
   assert.equal(quote.serviceCharge, 0);
   const tx = (await api.call('GET', '/v1/landlord/transactions', { token: owner })).body.data[0];
   assert.equal(tx.reference, purchase.reference);
-  assert.equal(tx.ownerServiceCharge, 447.56); // the whole ₦447.56 markup
+  assert.equal(tx.ownerServiceCharge, 1000);
   assert.equal(tx.landlordNet, 0);
   const m = await api.call('GET', `/v1/landlord/meters/${METER}`, { token: owner });
-  assert.equal(m.body.meter.service.ownerDue, 1052.44);
+  assert.equal(m.body.meter.service.ownerDue, 500);
 });
 
 test('tenant monthly: due when the month starts, payable on its own', async () => {
   const patch = await api.call('PATCH', `/v1/landlord/meters/${METER}`, { token: owner, body: { servicePayer: 'tenant_monthly' } });
   assert.equal(patch.body.meter.service.payer, 'tenant_monthly');
-  assert.equal(patch.body.meter.service.ownerDue, 1052.44); // stays the owner's
+  assert.equal(patch.body.meter.service.ownerDue, 500); // stays the owner's
   // This month is already billed (to the owner), so nothing is due yet.
   assert.equal((await api.call('GET', '/v1/tenant/dashboard', { token: tenant })).body.tenant.service.due, 0);
 
@@ -111,7 +112,7 @@ test('tenant monthly: an unpaid month is added to the next purchase', async () =
   assert.equal(quote.total - quote.fee, 6500);
   const m = await meterRow();
   assert.equal(m.service_due_kobo, 0);
-  assert.equal(m.service_owner_due_kobo, 105244 - 44756); // the owner's carry-over keeps coming off their share
+  assert.equal(m.service_owner_due_kobo, 0); // the owner's ₦500 carry-over came off their share
 });
 
 test('per purchase: charged for the days the units should last', async () => {

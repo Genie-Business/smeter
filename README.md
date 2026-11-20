@@ -53,10 +53,12 @@ months are added to their next purchase), or *the tenant with each purchase* (ea
 purchase pays for the days its units should last, from the meter's average daily
 use). Logic in `backend/src/services/service-charge.js`; the sweeper bills new months.
 
-**Money split:** units are priced at the landlord's rate. The platform keeps the
-base utility cost (and the gateway fee when the tenant pays it); the landlord's
-Paystack subaccount gets the markup plus any recovered debt (minus the fee when the
-landlord chooses to bear it). The ledger screen shows this per meter.
+**Money split (Paystack split payment):** units are priced at the owner's rate. All
+the power money, plus any recovered debt, settles to the owner's Paystack subaccount
+(minus the gateway fee when the owner chooses to bear it, and minus their GPRS service
+charge when they pay it). The company account keeps only the GPRS service charge and
+the gateway fee when the tenant pays it. The owner pays the utility themselves; the
+ledger screen shows an estimate of that bill and their margin.
 
 ### Requirements coverage
 
