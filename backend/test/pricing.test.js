@@ -6,17 +6,15 @@ const { gatewayFee, grossUp, quote } = await import('../src/services/pricing.js'
 
 const P = {
   feePercent: 1.5,
-  feeFlatKobo: 10000,
-  feeFlatThresholdKobo: 250000,
   feeCapKobo: 200000,
   minPurchaseKobo: 50000,
   maxPurchaseKobo: 50000000,
 };
 
-test('gateway fee: 1.5%, flat ₦100 from ₦2,500, capped at ₦2,000', () => {
+test('gateway fee: 1.5%, capped at ₦2,000, no flat fee', () => {
   assert.equal(gatewayFee(100000, P), 1500); // ₦1,000 → ₦15
-  assert.equal(gatewayFee(250000, P), 13750); // ₦2,500 → ₦37.50 + ₦100
-  assert.equal(gatewayFee(50000000, P), 200000); // capped
+  assert.equal(gatewayFee(250000, P), 3750); // ₦2,500 → ₦37.50
+  assert.equal(gatewayFee(50000000, P), 200000); // ₦500,000 → capped at ₦2,000
 });
 
 test('grossUp charges enough that the net covers the amount', () => {

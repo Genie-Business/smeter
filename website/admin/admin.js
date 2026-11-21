@@ -790,9 +790,7 @@ async function team(main) {
 // Payment settings
 // Same maths as the API's pricing service, for the live example.
 function gatewayFeeKobo(kobo, s) {
-  const pct = Math.round((kobo * s.feePercent) / 100);
-  const flat = kobo >= s.feeFlatThresholdNaira * 100 ? Math.round(s.feeFlatNaira * 100) : 0;
-  return Math.min(Math.round(s.feeCapNaira * 100), pct + flat);
+  return Math.min(Math.round(s.feeCapNaira * 100), Math.round((kobo * s.feePercent) / 100));
 }
 function grossUpKobo(amount, s) {
   let total = amount;
@@ -807,8 +805,6 @@ function grossUpKobo(amount, s) {
 
 const PAY_FIELDS = [
   ['feePercent', 'Percentage fee', '%', 'Charged on every payment.', '0.1'],
-  ['feeFlatNaira', 'Flat fee', '₦', 'Added on top of the percentage for larger payments.', '1'],
-  ['feeFlatThresholdNaira', 'Flat fee applies from', '₦', 'Payments at or above this amount get the flat fee.', '1'],
   ['feeCapNaira', 'Fee cap', '₦', 'The fee never goes above this.', '1'],
   ['minPurchaseNaira', 'Minimum purchase', '₦', 'Smallest amount a tenant or owner can buy.', '1'],
   ['maxPurchaseNaira', 'Maximum purchase', '₦', 'Largest amount in one payment.', '1'],

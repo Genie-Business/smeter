@@ -16,10 +16,9 @@
 import { config } from '../config.js';
 import { badRequest, conflict } from '../util/errors.js';
 
+/** Payment processing fee: a percentage of the payment, capped. */
 export function gatewayFee(kobo, p = config.payments) {
-  const pct = Math.round((kobo * p.feePercent) / 100);
-  const flat = kobo >= p.feeFlatThresholdKobo ? p.feeFlatKobo : 0;
-  return Math.min(p.feeCapKobo, pct + flat);
+  return Math.min(p.feeCapKobo, Math.round((kobo * p.feePercent) / 100));
 }
 
 /** Smallest total whose fee-net covers `amount`. */

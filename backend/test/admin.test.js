@@ -220,7 +220,7 @@ test('payment settings: owners edit, editors view, changes reach pricing and che
   assert.equal(view.body.settings.feePercent, 1.5);
   assert.equal(view.body.channelOptions.length, 3);
 
-  const next = { ...view.body.defaults, channels: ['card', 'ussd'], feePercent: 2, feeFlatNaira: 0, minPurchaseNaira: 1000 };
+  const next = { ...view.body.defaults, channels: ['card', 'ussd'], feePercent: 2, minPurchaseNaira: 1000 };
   const editorSave = await api.call('PUT', '/v1/staff/settings/payments', { token: editorToken, body: next });
   assert.equal(editorSave.status, 403);
 
@@ -251,7 +251,7 @@ test('payment settings: owners edit, editors view, changes reach pricing and che
   assert.match(tooSmall.body.error.message, /Minimum purchase is ₦1000/);
   const q = await api.call('POST', '/v1/tenant/quote', { token: tenant, body: { amount: 5000 } });
   assert.equal(q.status, 200, q.text);
-  // 2% with no flat fee, grossed up to ₦5,102.04 (fee ₦102.04) so ₦5,000 arrives
+  // 2%, grossed up to ₦5,102.04 (fee ₦102.04) so ₦5,000 arrives
   assert.equal(q.body.quote.total, 5102.04);
   const transfer = await api.call('POST', '/v1/tenant/purchases', { token: tenant, body: { amount: 5000, channel: 'bank_transfer' } });
   assert.equal(transfer.status, 400);

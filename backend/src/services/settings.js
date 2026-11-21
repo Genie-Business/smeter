@@ -23,8 +23,6 @@ function envDefaults() {
   return {
     channels: p.channels.filter((c) => CHANNEL_IDS.includes(c)),
     feePercent: p.feePercent,
-    feeFlatNaira: p.feeFlatKobo / 100,
-    feeFlatThresholdNaira: p.feeFlatThresholdKobo / 100,
     feeCapNaira: p.feeCapKobo / 100,
     minPurchaseNaira: p.minPurchaseKobo / 100,
     maxPurchaseNaira: p.maxPurchaseKobo / 100,
@@ -38,8 +36,6 @@ export const paymentSettingsSchema = z
   .object({
     channels: z.array(z.enum(CHANNEL_IDS)).min(1, 'Choose at least one payment channel').transform((c) => [...new Set(c)]),
     feePercent: z.coerce.number().min(0, 'Fee percent can’t be negative').max(10, 'Fee percent can be at most 10%'),
-    feeFlatNaira: money('Flat fee', 10_000),
-    feeFlatThresholdNaira: money('Flat fee threshold', 10_000_000),
     feeCapNaira: money('Fee cap', 100_000),
     minPurchaseNaira: z.coerce.number().min(100, 'Minimum purchase must be at least ₦100').max(1_000_000),
     maxPurchaseNaira: z.coerce.number().min(100).max(10_000_000, 'Maximum purchase can be at most ₦10,000,000'),
@@ -76,8 +72,6 @@ export async function paymentParams() {
     ...config.payments,
     channels: s.channels,
     feePercent: s.feePercent,
-    feeFlatKobo: Math.round(s.feeFlatNaira * 100),
-    feeFlatThresholdKobo: Math.round(s.feeFlatThresholdNaira * 100),
     feeCapKobo: Math.round(s.feeCapNaira * 100),
     minPurchaseKobo: Math.round(s.minPurchaseNaira * 100),
     maxPurchaseKobo: Math.round(s.maxPurchaseNaira * 100),

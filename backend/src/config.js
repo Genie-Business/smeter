@@ -101,8 +101,6 @@ export const config = {
     channels: (env.PAYMENT_CHANNELS ?? 'card,bank_transfer,ussd').split(',').map((s) => s.trim()),
     // Paystack NG local pricing: 1.5% + ₦100 (flat waived under ₦2,500), capped at ₦2,000.
     feePercent: num('PAYMENT_FEE_PERCENT', 1.5),
-    feeFlatKobo: num('PAYMENT_FEE_FLAT_NAIRA', 100) * 100,
-    feeFlatThresholdKobo: num('PAYMENT_FEE_FLAT_THRESHOLD_NAIRA', 2500) * 100,
     feeCapKobo: num('PAYMENT_FEE_CAP_NAIRA', 2000) * 100,
     minPurchaseKobo: num('MIN_PURCHASE_NAIRA', 500) * 100,
     maxPurchaseKobo: num('MAX_PURCHASE_NAIRA', 500000) * 100,
