@@ -803,6 +803,8 @@ function grossUpKobo(amount, s) {
   return total;
 }
 
+// Payment settings fields by key (not position, so removing one can't shift the others).
+const payFields = (...keys) => keys.map((k) => PAY_FIELDS.find(([key]) => key === k)).filter(Boolean);
 const PAY_FIELDS = [
   ['feePercent', 'Percentage fee', '%', 'Charged on every payment.', '0.1'],
   ['feeCapNaira', 'Fee cap', '₦', 'The fee never goes above this.', '1'],
@@ -853,13 +855,13 @@ async function paymentSettings(main) {
           <div class="hint">The app only shows these, and the server refuses the others. Default: ${r.defaults.channels.map(labelOf).join(', ')}</div>
         </div>
         <h2 style="margin-top:22px">Purchase limits</h2>
-        ${PAY_FIELDS.slice(4, 6).map(field)}
+        ${payFields('minPurchaseNaira', 'maxPurchaseNaira').map(field)}
         <h2 style="margin-top:22px">Unconfirmed payments</h2>
-        ${field(PAY_FIELDS[6])}
+        ${payFields('auditAfterMinutes').map(field)}
       </div>
       <div class="card">
         <h2>Service fee</h2>
-        ${PAY_FIELDS.slice(0, 4).map(field)}
+        ${payFields('feePercent', 'feeCapNaira').map(field)}
         <div class="example" id="example"></div>
       </div>
     </div>
