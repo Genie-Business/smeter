@@ -84,6 +84,9 @@ class LandlordRepository {
 
   Future<LandlordDashboard> dashboard() async => LandlordDashboard(await _api.get('/v1/landlord/dashboard'));
 
+  /// Deletes (deactivates) the account after checking the password.
+  Future<void> deleteAccount(String password) async => _api.post('/v1/landlord/me/delete', {'password': password});
+
   Future<Landlord> me() async => Landlord.fromJson(_m((await _api.get('/v1/landlord/me'))['landlord']));
 
   Future<Landlord> updateMe({String? fullName, String? address}) async => Landlord.fromJson(

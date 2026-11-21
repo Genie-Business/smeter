@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { config } from '../config.js';
 import { db, now } from '../db.js';
 import { requireLandlord } from '../auth/middleware.js';
+import { verifyPassword } from '../auth/password.js';
 import { consumeOtp, issueOtp, otpEcho } from '../auth/otp.js';
 import { asUpstream } from '../geni/client.js';
 import { geni } from '../geni/index.js';
@@ -49,6 +50,15 @@ async function ownedMeter(landlord, meterId) {
 
 landlordRoutes.get('/me', (req, res) => {
   res.json({ landlord: landlordDto(req.landlord) });
+});
+
+// Delete account (required by the app stores). Deactivates it: the owner can't sign
+// in or reset their password again. Confirmed with the account password.
+landlordRoutes.post('/me/delete', async (req, res) => {
+  const { password } = parse(z.object({ password: z.string().min(1, 'Enter your password').max(200) }), req.body);
+  if (!(await verifyPassword(password, req.landlord.password_hash))) throw badRequest('That password is incorrect');
+  await db().run('UPDATE landlords SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL', now(), req.landlord.id);
+  res.json({ ok: true });
 });
 
 landlordRoutes.patch('/me', async (req, res) => {

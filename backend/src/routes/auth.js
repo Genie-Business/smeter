@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import { SignJWT, jwtVerify } from 'jose';
 import { z } from 'zod';
@@ -68,6 +69,9 @@ authRoutes.post('/landlord/login', authLimiter, async (req, res) => {
   if (!landlord || !(await verifyPassword(body.password, landlord.password_hash))) {
     throw unauthorized('Incorrect email/phone or password');
   }
+  if (landlord.deleted_at) {
+    throw unauthorized('This account has been deleted. Contact support if you want it restored.');
+  }
   res.json({ token: await signAccessToken({ role: 'landlord', sub: landlord.id }), landlord: landlordDto(landlord) });
 });
 
@@ -88,7 +92,7 @@ const accountIdentifier = z
 
 async function findAccount(identifier) {
   const landlord = await db().get(
-    'SELECT id, email FROM landlords WHERE email = ? OR phone = ?',
+    'SELECT id, email FROM landlords WHERE (email = ? OR phone = ?) AND deleted_at IS NULL',
     identifier.toLowerCase(), normalizePhone(identifier) ?? '',
   );
   if (!landlord) throw notFound('We couldn’t find an account with that email or phone number');
@@ -133,6 +137,9 @@ authRoutes.post('/password/reset', authLimiter, async (req, res) => {
 const linkedMeter = (meterId) =>
   db().get("SELECT * FROM meters WHERE meter_id = ? AND status IN ('invited','active')", meterId);
 
+// The store-review demo meter (see config.otp.reviewMeterId).
+const isReviewMeter = (meterId) => Boolean(config.otp.reviewMeterId && config.otp.reviewCode && meterId === config.otp.reviewMeterId);
+
 authRoutes.post('/tenant/start', otpLimiter, async (req, res) => {
   const { meterId } = parse(z.object({ meterId: meterIdField }), req.body);
   const meter = await linkedMeter(meterId);
@@ -142,6 +149,9 @@ authRoutes.post('/tenant/start', otpLimiter, async (req, res) => {
   if (!meter.tenant_email) {
     throw conflict('There’s no email address on this meter yet. Ask your property owner to add your email in the smeter app.');
   }
+  if (isReviewMeter(meterId)) {
+    return res.json({ sentTo: maskEmail(meter.tenant_email), channel: 'email', expiresInMinutes: config.otp.ttlMinutes });
+  }
   const code = await issueOtp({ purpose: 'tenant_login', subject: meterId });
   await sendEmail(codeEmail({ to: meter.tenant_email, purpose: 'login', code, detail: `For meter ${meterId}.` }));
   res.json({ sentTo: maskEmail(meter.tenant_email), channel: 'email', expiresInMinutes: config.otp.ttlMinutes, ...otpEcho(code) });
@@ -149,7 +159,11 @@ authRoutes.post('/tenant/start', otpLimiter, async (req, res) => {
 
 authRoutes.post('/tenant/verify', otpLimiter, async (req, res) => {
   const { meterId, code } = parse(z.object({ meterId: meterIdField, code: z.string().trim() }), req.body);
-  await consumeOtp({ purpose: 'tenant_login', subject: meterId, code });
+  if (isReviewMeter(meterId)) {
+    if (!timingSafeEqual(Buffer.from(code.padEnd(6).slice(0, 6)), Buffer.from(config.otp.reviewCode))) throw badRequest('That code is incorrect');
+  } else {
+    await consumeOtp({ purpose: 'tenant_login', subject: meterId, code });
+  }
   const meter = await linkedMeter(meterId);
   if (!meter) throw notFound('Meter not found');
   if (meter.status === 'invited') {

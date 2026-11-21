@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/api_client.dart';
 import '../../core/format.dart';
+import '../../core/links.dart';
 import '../../core/models.dart';
 import '../../core/session.dart';
 import '../../shared/widgets.dart';
@@ -83,6 +84,19 @@ class LandlordProfileScreen extends ConsumerWidget {
     if (ok == true) await ref.read(sessionProvider.notifier).signOut();
   }
 
+  /// Store requirement: owners can delete their account. It's deactivated (no sign-in again).
+  Future<void> _deleteAccount(BuildContext context, WidgetRef ref) async {
+    final password = await showDialog<String>(context: context, builder: (_) => const _DeleteAccountDialog());
+    if (password == null || !context.mounted) return;
+    try {
+      await ref.read(landlordRepositoryProvider).deleteAccount(password);
+    } catch (e) {
+      if (context.mounted) showError(context, e);
+      return;
+    }
+    await ref.read(sessionProvider.notifier).signOut();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final me = ref.watch(landlordProfileProvider);
@@ -144,7 +158,13 @@ class LandlordProfileScreen extends ConsumerWidget {
                 const Divider(indent: 60),
                 _NavRow(icon: Icons.support_agent_rounded, label: 'Help & support', onTap: () => context.push('/support')),
                 const Divider(indent: 60),
+                _NavRow(icon: Icons.privacy_tip_outlined, label: 'Privacy policy', onTap: () => openLink(context, SmeterLinks.privacy)),
+                const Divider(indent: 60),
+                _NavRow(icon: Icons.description_outlined, label: 'Terms and conditions', onTap: () => openLink(context, SmeterLinks.terms)),
+                const Divider(indent: 60),
                 _NavRow(icon: Icons.logout_rounded, label: 'Sign out', danger: true, onTap: () => _signOut(context, ref)),
+                const Divider(indent: 60),
+                _NavRow(icon: Icons.person_remove_outlined, label: 'Delete account', danger: true, onTap: () => _deleteAccount(context, ref)),
               ]),
             ),
           ]),
@@ -157,6 +177,49 @@ class LandlordProfileScreen extends ConsumerWidget {
     final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
     return parts.take(2).map((p) => p[0].toUpperCase()).join();
   }
+}
+
+class _DeleteAccountDialog extends StatefulWidget {
+  const _DeleteAccountDialog();
+
+  @override
+  State<_DeleteAccountDialog> createState() => _DeleteAccountDialogState();
+}
+
+class _DeleteAccountDialogState extends State<_DeleteAccountDialog> {
+  final _password = TextEditingController();
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Delete your account?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('You’ll be signed out and won’t be able to sign in again. Payment records are kept as the law requires. '
+              'If your tenants still buy power through smeter, contact support first so the meters can be moved.'),
+          const SizedBox(height: Space.md),
+          TextField(
+            controller: _password,
+            obscureText: true,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Your password'),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: SmeterColors.danger),
+            onPressed: () {
+              if (_password.text.isNotEmpty) Navigator.pop(context, _password.text);
+            },
+            child: const Text('Delete account'),
+          ),
+        ],
+      );
 }
 
 /// Peach "Payment Details" card from the Transfer design.

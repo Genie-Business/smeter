@@ -39,6 +39,7 @@ export function landlordDto(l) {
     feeBearer: l.fee_bearer,
     payoutSchedule: l.payout_schedule ?? 'daily',
     setup: ownerSetup(l),
+    deletedAt: l.deleted_at ?? null, // deactivated by the owner (Delete account)
     tariffLimits: {
       max: tariffNow().maxUnitPriceNaira,
       baseCost: tariffNow().baseUnitCostNaira,

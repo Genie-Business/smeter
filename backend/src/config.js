@@ -133,6 +133,10 @@ export const config = {
     // Return OTP codes in API responses. Never honoured in production.
     // Only on by default for local development; staging must opt in.
     echo: !isProduction && bool('OTP_DEBUG_ECHO', appEnv === 'development' || appEnv === 'test'),
+    // App Store / Play review: one demo meter whose tenant signs in with a fixed code
+    // (reviewers can't read the tenant's email). Off unless both are set.
+    reviewMeterId: (env.REVIEW_METER_ID ?? '').trim(),
+    reviewCode: /^\d{6}$/.test(env.REVIEW_LOGIN_CODE ?? '') ? env.REVIEW_LOGIN_CODE : '',
   },
 
   liveCacheSeconds: num('LIVE_CACHE_SECONDS', 5),

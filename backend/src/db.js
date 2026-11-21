@@ -63,6 +63,9 @@ ALTER TABLE landlords ADD COLUMN IF NOT EXISTS payout_schedule TEXT NOT NULL DEF
   CHECK (payout_schedule IN ('daily','weekly','monthly'));
 -- Whether the subaccount carries the smeter product tag (older ones are tagged by the sweeper).
 ALTER TABLE landlords ADD COLUMN IF NOT EXISTS settlement_tagged BOOLEAN NOT NULL DEFAULT false;
+-- Set when the owner deletes their account in the app: it's deactivated (no sign-in,
+-- no password reset). Records are kept; staff can see when it happened.
+ALTER TABLE landlords ADD COLUMN IF NOT EXISTS deleted_at TEXT;
 
 -- GPRS service charge (keeps an automatic-delivery meter online). service_billed_until
 -- is the date the charge has been billed through; unpaid monthly charges build up

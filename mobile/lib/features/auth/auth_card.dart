@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/links.dart';
 import '../../theme/smeter_theme.dart';
 
 /// Frosted card over the grayscale background used by the Authentication,
@@ -75,6 +76,15 @@ class AuthCardScaffold extends StatelessWidget {
   }
 }
 
+InlineSpan _linkSpan(BuildContext context, String text, String url, TextStyle style) => WidgetSpan(
+      alignment: PlaceholderAlignment.baseline,
+      baseline: TextBaseline.alphabetic,
+      child: GestureDetector(
+        onTap: () => openLink(context, url),
+        child: Text(text, style: GoogleFonts.montserrat(fontSize: 11, height: 1.5).merge(style)),
+      ),
+    );
+
 class LegalFooter extends StatelessWidget {
   const LegalFooter({super.key, this.prefix = 'By Signing In, you agree to our '});
 
@@ -88,9 +98,9 @@ class LegalFooter extends StatelessWidget {
         style: GoogleFonts.montserrat(color: Colors.white, fontSize: 11, height: 1.5),
         children: [
           TextSpan(text: prefix),
-          const TextSpan(text: 'Privacy Policy', style: link),
+          _linkSpan(context, 'Privacy Policy', SmeterLinks.privacy, link),
           const TextSpan(text: ' and '),
-          const TextSpan(text: 'Terms and Conditions', style: link),
+          _linkSpan(context, 'Terms and Conditions', SmeterLinks.terms, link),
         ],
       ),
       textAlign: TextAlign.center,

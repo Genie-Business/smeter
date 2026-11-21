@@ -15,7 +15,7 @@ export function requireLandlord() {
       const claims = await authenticate(req);
       if (claims.role !== 'landlord') throw forbidden();
       const landlord = await db().get('SELECT * FROM landlords WHERE id = ?', Number(claims.sub));
-      if (!landlord) throw unauthorized();
+      if (!landlord || landlord.deleted_at) throw unauthorized('This account has been deleted');
       req.landlord = landlord;
       next();
     } catch (err) {

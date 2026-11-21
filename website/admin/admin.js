@@ -317,7 +317,7 @@ async function ownersList(main, _x, state = { page: 1, search: '' }) {
     <div class="table-wrap"><table>
       <thead><tr><th>Owner</th><th>Phone</th><th class="r">Meters</th><th class="r">Collected</th><th class="r">Earned</th><th>Payouts</th><th>Joined</th></tr></thead>
       <tbody>${r.data.length ? r.data.map((l) => html`<tr class="link" data-href="#/owners/${l.id}">
-        <td><b>${l.fullName}</b><div class="muted">${l.email}</div></td><td>${l.phone}</td>
+        <td><b>${l.fullName}</b>${l.deletedAt ? html` <span class="pill">Deleted</span>` : ''}<div class="muted">${l.email}</div></td><td>${l.phone}</td>
         <td class="r num">${l.meterCount}</td><td class="r num">${nairaWhole(l.collected)}</td><td class="r num">${nairaWhole(l.earned)}</td>
         <td>${l.bank ? (l.bank.settlementActive ? html`<span class="pill ok">Automatic</span>` : html`<span class="pill warn">Unverified</span>`) : html`<span class="pill">Not set</span>`}</td>
         <td>${date(l.createdAt)}</td></tr>`) : html`<tr><td colspan="7" class="empty">No property owners match.</td></tr>`}</tbody>
@@ -332,7 +332,7 @@ async function ownerDetail(main, id) {
   const l = r.landlord;
   render(main, html`
     <a class="crumb" href="#/owners">← Property owners</a>
-    <div class="page-head"><div><h1>${l.fullName}</h1><p>${l.email} · ${l.phone} · joined ${date(l.createdAt)}</p></div></div>
+    <div class="page-head"><div><h1>${l.fullName}</h1><p>${l.email} · ${l.phone} · joined ${date(l.createdAt)}${l.deletedAt ? ` · deleted their account ${date(l.deletedAt)}` : ''}</p></div>${l.deletedAt ? html`<span class="pill">Account deleted</span>` : ''}</div>
     <div class="grid g4">
       <div class="card kpi"><div class="label">Meters</div><div class="value">${r.meters.length}</div></div>
       <div class="card kpi"><div class="label">Collected</div><div class="value">${nairaWhole(r.totals.collected)}</div><div class="sub">${num(r.totals.purchases)} purchases</div></div>

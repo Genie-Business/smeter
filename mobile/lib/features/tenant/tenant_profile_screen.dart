@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../core/links.dart';
 import '../../core/models.dart';
 import '../../core/session.dart';
 import '../../shared/widgets.dart';
@@ -203,6 +204,10 @@ class _ProfileBodyState extends ConsumerState<_ProfileBody> {
                   : () => copyText(context, t.landlordPhone!, 'Phone number'),
             ),
           ],
+          const Divider(indent: 60),
+          _Row(icon: Icons.privacy_tip_outlined, label: 'Privacy policy', onTap: () => openLink(context, SmeterLinks.privacy)),
+          const Divider(indent: 60),
+          _Row(icon: Icons.description_outlined, label: 'Terms and conditions', onTap: () => openLink(context, SmeterLinks.terms)),
           const Divider(indent: 60),
           _Row(icon: Icons.logout_rounded, label: 'Sign out', danger: true, onTap: _signOut),
         ]),
