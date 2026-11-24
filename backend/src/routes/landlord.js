@@ -37,6 +37,27 @@ async function syncTariff(landlord) {
   return tariffId;
 }
 
+/**
+ * Source B's price on the head-end: the owner's second tariff, used as the
+ * account's second-rate (S2) tariff on dual-source meters. Falls back to the
+ * source A price until the owner sets one.
+ */
+async function syncTariffB(landlord) {
+  const tariffId = landlord.tariff_id_b ?? `${tariffIdFor(landlord, (await getGeniSettings()).tariffPrefix)}B`;
+  const { baseUnitCostNaira } = await getTariffSettings();
+  const price = koboToNaira(landlord.unit_price_b_kobo || landlord.unit_price_kobo || Math.round(baseUnitCostNaira * 100));
+  await geni().upsertTariff({ tariffId, tariffName: `${landlord.full_name} source B (smeter)`.slice(0, 60), price, tax: 0 });
+  if (!landlord.tariff_id_b) await db().run('UPDATE landlords SET tariff_id_b = ? WHERE id = ?', tariffId, landlord.id);
+  return tariffId;
+}
+
+/** A source B that is sold prepaid needs a dual-source meter and a price for it. */
+function checkPrepaidB(landlord, dual, prepaid) {
+  if (!prepaid) return;
+  if (!dual) throw badRequest('Turn on the second power source before selling it prepaid');
+  if (!(landlord.unit_price_b_kobo > 0)) throw badRequest('Set a price per kWh for the second source first', { sourceBPrepaid: 'Set the second source price first' });
+}
+
 async function ownedMeter(landlord, meterId) {
   const meter = await db().get(
     "SELECT * FROM meters WHERE meter_id = ? AND landlord_id = ? AND status != 'removed'",
@@ -115,30 +136,62 @@ landlordRoutes.get('/dashboard', async (req, res) => {
 // ---- Tariff & fees (SM-FIN-001, SM-PAY-004) --------------------------------
 
 landlordRoutes.put('/tariff', async (req, res) => {
-  const { unitPrice } = parse(z.object({ unitPrice: z.coerce.number().positive('Enter a price per kWh') }), req.body);
+  const body = parse(
+    z.object({
+      unitPrice: z.coerce.number().positive('Enter a price per kWh').optional(),
+      // Price of the second source on dual-source meters (e.g. a generator).
+      unitPriceB: z.coerce.number().positive('Enter a price per kWh').optional(),
+    }).refine((b) => b.unitPrice !== undefined || b.unitPriceB !== undefined, { message: 'Enter a price per kWh' }),
+    req.body,
+  );
   const limits = await getTariffSettings();
-  if (unitPrice > limits.maxUnitPriceNaira) {
-    throw badRequest(`The regulated maximum is ₦${limits.maxUnitPriceNaira} per kWh`);
+  const { unitPrice, unitPriceB } = body;
+  if (unitPrice !== undefined) {
+    if (unitPrice > limits.maxUnitPriceNaira) {
+      throw badRequest(`The regulated maximum is ₦${limits.maxUnitPriceNaira} per kWh`);
+    }
+    if (unitPrice < limits.baseUnitCostNaira) {
+      throw badRequest(`Price can't be below the utility cost of ₦${limits.baseUnitCostNaira} per kWh`);
+    }
   }
-  if (unitPrice < limits.baseUnitCostNaira) {
-    throw badRequest(`Price can't be below the utility cost of ₦${limits.baseUnitCostNaira} per kWh`);
+  // The utility's regulated floor applies to source A only; source B is the owner's own supply.
+  if (unitPriceB !== undefined && unitPriceB > limits.maxUnitPriceNaira) {
+    throw badRequest(`The maximum is ₦${limits.maxUnitPriceNaira} per kWh`);
   }
-  const previous = req.landlord.unit_price_kobo;
-  await db().run('UPDATE landlords SET unit_price_kobo = ? WHERE id = ?', nairaToKobo(unitPrice), req.landlord.id);
+  const previous = req.landlord;
+  await db().run(
+    'UPDATE landlords SET unit_price_kobo = ?, unit_price_b_kobo = ? WHERE id = ?',
+    unitPrice === undefined ? previous.unit_price_kobo : nairaToKobo(unitPrice),
+    unitPriceB === undefined ? previous.unit_price_b_kobo : nairaToKobo(unitPriceB),
+    req.landlord.id,
+  );
   const landlord = await reload(req.landlord.id);
   try {
-    await syncTariff(landlord);
+    if (unitPrice !== undefined) await syncTariff(landlord);
+    if (landlord.tariff_id_b) await syncTariffB(landlord);
   } catch (err) {
-    await db().run('UPDATE landlords SET unit_price_kobo = ? WHERE id = ?', previous, req.landlord.id);
+    await db().run(
+      'UPDATE landlords SET unit_price_kobo = ?, unit_price_b_kobo = ? WHERE id = ?',
+      previous.unit_price_kobo, previous.unit_price_b_kobo, req.landlord.id,
+    );
     throw asUpstream(err);
   }
-  const tenants = await db().all("SELECT meter_id FROM meters WHERE landlord_id = ? AND status = 'active'", landlord.id);
+  const tenants = await db().all("SELECT meter_id, dual_source, source_b_label FROM meters WHERE landlord_id = ? AND status = 'active'", landlord.id);
   for (const t of tenants) {
-    await notify({
-      recipientType: 'tenant', recipientId: t.meter_id, kind: 'tariff',
-      title: 'Unit price updated',
-      body: `Power now costs ₦${unitPrice.toFixed(2)} per kWh on your meter.`,
-    });
+    if (unitPrice !== undefined) {
+      await notify({
+        recipientType: 'tenant', recipientId: t.meter_id, kind: 'tariff',
+        title: 'Unit price updated',
+        body: `Power now costs ₦${unitPrice.toFixed(2)} per kWh on your meter.`,
+      });
+    }
+    if (unitPriceB !== undefined && t.dual_source) {
+      await notify({
+        recipientType: 'tenant', recipientId: t.meter_id, kind: 'tariff',
+        title: 'Unit price updated',
+        body: `${t.source_b_label || 'Source B'} power now costs ₦${unitPriceB.toFixed(2)} per kWh on your meter.`,
+      });
+    }
   }
   res.json({ landlord: landlordDto(landlord) });
 });
@@ -290,6 +343,15 @@ landlordRoutes.get('/meters', async (req, res) => {
   res.json({ meters: meters.map(meterDto) });
 });
 
+// Dual-source meters: our accessory meters a second power source separately.
+const sourceLabel = z.string().trim().min(1).max(24);
+const dualSourceFields = {
+  dualSource: z.boolean().optional(),
+  sourceALabel: sourceLabel.optional(),
+  sourceBLabel: sourceLabel.optional(),
+  sourceBPrepaid: z.boolean().optional(),
+};
+
 const meterBody = z.object({
   meterId: z.string().trim().regex(/^\d{6,20}$/, 'Enter the serial number printed on the meter'),
   address: z.string().trim().min(3, 'Enter the property address').max(240),
@@ -304,6 +366,7 @@ const meterBody = z.object({
   deliveryMode: z.enum(['ota', 'manual']).optional().default('ota'),
   // Who pays the GPRS service charge (automatic delivery only).
   servicePayer: z.enum(SERVICE_PAYERS).optional().default('owner'),
+  ...dualSourceFields,
 });
 
 /** Refuse to add meters until the owner's address, price and payout account are set. */
@@ -318,6 +381,7 @@ function requireSetup(landlord) {
 landlordRoutes.post('/meters', async (req, res) => {
   requireSetup(req.landlord);
   const body = parse(meterBody, req.body);
+  checkPrepaidB(req.landlord, body.dualSource, body.sourceBPrepaid);
   const tenantPhone = normalizePhone(body.tenantPhone);
   if (!tenantPhone) throw badRequest("Enter the tenant's phone number", { tenantPhone: 'Invalid phone number' });
 
@@ -346,7 +410,8 @@ landlordRoutes.post('/meters', async (req, res) => {
       const name = [body.tenantFirstName, body.tenantLastName].filter(Boolean).join(' ') || `Apt ${body.apartment || body.meterId}`;
       await client.upsertCustomer({ customerId, customerName: name, phone: tenantPhone, address: body.address });
     }
-    customerId = await client.bindAccount({ customerId, meterId: body.meterId, region: body.address.slice(0, 60), tariffId }, account);
+    const tariffIdB = body.dualSource ? await syncTariffB(req.landlord) : undefined;
+    customerId = await client.bindAccount({ customerId, meterId: body.meterId, region: body.address.slice(0, 60), tariffId, tariffIdB }, account);
   } catch (err) {
     throw asUpstream(err);
   }
@@ -382,6 +447,12 @@ landlordRoutes.post('/meters', async (req, res) => {
       throw err;
     }
   }
+  await db().run(
+    `UPDATE meters SET dual_source = ?, source_a_label = COALESCE(?, 'Grid'), source_b_label = COALESCE(?, 'Generator'),
+       source_b_prepaid = ? WHERE meter_id = ?`,
+    Boolean(body.dualSource), body.sourceALabel ?? null, body.sourceBLabel ?? null,
+    Boolean(body.dualSource && body.sourceBPrepaid), body.meterId,
+  );
   await sendEmail(inviteEmail({ to: body.tenantEmail, ownerName: req.landlord.full_name, meterId: body.meterId }));
   const meter = await db().get('SELECT * FROM meters WHERE meter_id = ?', body.meterId);
   res.status(201).json({ meter: meterDto(meter) });
@@ -414,8 +485,31 @@ landlordRoutes.patch('/meters/:meterId', async (req, res) => {
       deliveryMode: z.enum(['ota', 'manual']).optional(),
       servicePayer: z.enum(SERVICE_PAYERS).optional(),
       tenantEmail: z.string().trim().toLowerCase().email("Enter the tenant's email address").optional(),
+      ...dualSourceFields,
     }),
     req.body,
+  );
+  const dual = body.dualSource ?? Boolean(meter.dual_source);
+  const prepaidB = dual && (body.sourceBPrepaid ?? Boolean(meter.source_b_prepaid));
+  checkPrepaidB(req.landlord, dual, body.sourceBPrepaid ?? (body.dualSource ? false : undefined));
+  if (body.dualSource !== undefined && dual !== Boolean(meter.dual_source)) {
+    // Point the account's second-rate tariff at source B's (or back at source A's).
+    try {
+      const client = geni();
+      const account = await client.getAccount(meter.meter_id);
+      if (account) {
+        const tariffId = await syncTariff(req.landlord);
+        const tariffIdB = dual ? await syncTariffB(req.landlord) : undefined;
+        await client.bindAccount({ customerId: meter.customer_id, meterId: meter.meter_id, region: meter.address.slice(0, 60), tariffId, tariffIdB }, account);
+      }
+    } catch (err) {
+      throw asUpstream(err);
+    }
+  }
+  await db().run(
+    `UPDATE meters SET dual_source = ?, source_a_label = COALESCE(?, source_a_label),
+       source_b_label = COALESCE(?, source_b_label), source_b_prepaid = ? WHERE id = ?`,
+    dual, body.sourceALabel ?? null, body.sourceBLabel ?? null, prepaidB, meter.id,
   );
   await db().run(
     `UPDATE meters SET address = COALESCE(?, address), apartment = COALESCE(?, apartment),
@@ -504,6 +598,7 @@ landlordRoutes.post('/purchases', async (req, res) => {
       meterId: z.string().trim(),
       amount: z.coerce.number().positive(),
       channel: z.enum(['card', 'bank_transfer', 'ussd']).optional(),
+      source: z.enum(['a', 'b']).optional().default('a'),
     }),
     req.body,
   );
@@ -515,6 +610,7 @@ landlordRoutes.post('/purchases', async (req, res) => {
     initiatedBy: 'landlord',
     email: req.landlord.email,
     channel: body.channel,
+    source: body.source,
   });
   res.status(201).json({ reference: result.reference, authorizationUrl: result.authorizationUrl, quote: quoteDto(result.quote) });
 });

@@ -124,6 +124,17 @@ CREATE INDEX IF NOT EXISTS purchases_status ON purchases(status, created_at);
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'units' CHECK (kind IN ('units','service'));
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS service_kobo BIGINT NOT NULL DEFAULT 0;        -- service charge collected
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS service_owner_kobo BIGINT NOT NULL DEFAULT 0;  -- part of it taken from the owner's share
+-- Dual-source meters: one meter with our accessory metering two power sources
+-- (e.g. grid + generator) separately. Source A is the meter's main register,
+-- source B the accessory's. Each source has its own price; source B is only
+-- prepaid (second-rate S2 tokens) when the owner turns that on.
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS dual_source BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS source_a_label TEXT NOT NULL DEFAULT 'Grid';
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS source_b_label TEXT NOT NULL DEFAULT 'Generator';
+ALTER TABLE meters ADD COLUMN IF NOT EXISTS source_b_prepaid BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE landlords ADD COLUMN IF NOT EXISTS unit_price_b_kobo BIGINT NOT NULL DEFAULT 0;  -- price per kWh on source B
+ALTER TABLE landlords ADD COLUMN IF NOT EXISTS tariff_id_b TEXT;                              -- head-end tariff for source B (S2)
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'a' CHECK (source IN ('a','b'));
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS service_days DOUBLE PRECISION NOT NULL DEFAULT 0; -- days billed ahead (per purchase)
 
 CREATE TABLE IF NOT EXISTS otps (

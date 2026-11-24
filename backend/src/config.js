@@ -90,6 +90,9 @@ export const config = {
     // Unit of the instantaneous "Active Power" columns when the label doesn't say.
     powerUnit: env.GENI_POWER_UNIT === 'kW' ? 'kW' : 'W',
     pushTokensOta: bool('GENI_PUSH_TOKENS_OTA', true),
+    // Dual-source meters: the load-profile column that carries source B's energy
+    // register (a regex on the column label). Source A is the meter's main energy column.
+    sourceBColumn: env.GENI_SOURCE_B_COLUMN ?? String.raw`(tariff|rate|source|channel|register)\s*(2|b|ii)\b|\bs2\b`,
     // Load-profile energy columns are cumulative register readings by default.
     energyMode: env.GENI_ENERGY_MODE ?? 'cumulative', // 'cumulative' | 'interval'
   },

@@ -7,7 +7,7 @@ import { listNotifications, markAllRead, unreadCount } from '../services/notific
 import { accrueServiceCharge } from '../services/service-charge.js';
 import { refreshMeter, syncDeliveries, syncPhase } from '../services/meter-sync.js';
 import { liveReading, monthSummary, unitsBalance, usageReport } from '../services/usage.js';
-import { createPurchase, createServicePayment, getPurchase, purchaseDto, quoteFor, settlePayment } from '../services/vending.js';
+import { createPurchase, createServicePayment, getPurchase, purchaseDto, quoteFor, settlePayment, sourcePrice } from '../services/vending.js';
 import { badRequest, notFound } from '../util/errors.js';
 import { koboToNaira, nairaToKobo, pageParams, parse } from '../util/http.js';
 import { tenantDto } from './dto.js';
@@ -45,7 +45,7 @@ tenantRoutes.patch('/me', async (req, res) => {
 tenantRoutes.get('/dashboard', async (req, res) => {
   req.meter = await accrueServiceCharge(await refreshMeter(req.meter)); // bills a new month before showing what's due
   await syncDeliveries({ meterId: req.meter.meter_id });
-  const [recent, landlord, last, points, month, unread] = await Promise.all([
+  const [recent, landlord, last, points, pointsB, month, unread] = await Promise.all([
     db().all(
       `SELECT * FROM purchases WHERE meter_id = ? AND status IN ('vended','paid','vending','pending')
        ORDER BY id DESC LIMIT 5`,
@@ -57,12 +57,14 @@ tenantRoutes.get('/dashboard', async (req, res) => {
       req.meter.meter_id,
     ),
     unitsBalance(req.meter),
+    req.meter.dual_source && req.meter.source_b_prepaid ? unitsBalance(req.meter, 'b') : null,
     monthSummary(req.meter),
     unreadCount('tenant', req.meter.meter_id),
   ]);
   res.json({
     tenant: tenantDto(req.meter, landlord),
     points,
+    ...(req.meter.dual_source && req.meter.source_b_prepaid ? { pointsB } : {}),
     month,
     lastToken: last ? purchaseDto(last) : null,
     recent: recent.map((p) => purchaseDto(p)),
@@ -86,28 +88,37 @@ tenantRoutes.get('/usage', async (req, res) => {
   const anchor = date ? new Date(`${date}T12:00:00+01:00`) : new Date();
   if (anchor.getTime() > Date.now() + 24 * 3600 * 1000) throw badRequest('That date is in the future');
   const landlord = await landlordOf(req.meter);
-  res.json(await usageReport(await syncPhase(req.meter), landlord.unit_price_kobo, period, anchor));
+  res.json(await usageReport(await syncPhase(req.meter), landlord.unit_price_kobo, period, anchor, { unitPriceBKobo: landlord.unit_price_b_kobo }));
 });
 
-const amountBody = z.object({ amount: z.coerce.number().positive('Enter an amount') });
+const amountBody = z.object({
+  amount: z.coerce.number().positive('Enter an amount'),
+  // Which power source to buy for on a dual-source meter (default: the main one).
+  source: z.enum(['a', 'b']).optional().default('a'),
+});
 // Enabled channels are checked against the admin's payment settings at purchase time.
 export const channelField = z.enum(['card', 'bank_transfer', 'ussd']).optional();
 
 // Tariff visibility + fee breakdown before confirming (features 10, SM-PAY-004).
 tenantRoutes.post('/quote', async (req, res) => {
-  const { amount } = parse(amountBody, req.body);
+  const { amount, source } = parse(amountBody, req.body);
   const landlord = await landlordOf(req.meter);
-  res.json({ quote: quoteDto(await quoteFor(req.meter, landlord, nairaToKobo(amount))), unitPrice: koboToNaira(landlord.unit_price_kobo) });
+  res.json({
+    quote: quoteDto(await quoteFor(req.meter, landlord, nairaToKobo(amount), undefined, { source })),
+    unitPrice: koboToNaira(sourcePrice(req.meter, landlord, source)),
+    source,
+  });
 });
 
 tenantRoutes.post('/purchases', async (req, res) => {
-  const { amount, channel } = parse(amountBody.extend({ channel: channelField }), req.body);
+  const { amount, channel, source } = parse(amountBody.extend({ channel: channelField }), req.body);
   const result = await createPurchase({
     meter: req.meter,
     landlord: await landlordOf(req.meter),
     amountKobo: nairaToKobo(amount),
     initiatedBy: 'tenant',
     channel,
+    source,
   });
   res.status(201).json({ reference: result.reference, authorizationUrl: result.authorizationUrl, quote: quoteDto(result.quote) });
 });

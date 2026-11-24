@@ -29,6 +29,8 @@ export class MockGeniClient {
     this.customers = new Map();
     this.receipt = 100000;
     this.tasks = [];
+    this.vends = [];
+    this.dualSource = new Set(); // meter ids whose load profile also carries a source B register
   }
 
   async getMeter(meterId) {
@@ -55,9 +57,10 @@ export class MockGeniClient {
     this.tariffs.set(t.tariffId, t);
   }
 
-  async vendCredit({ meterId, amountNaira }) {
+  async vendCredit({ meterId, amountNaira, source = 'a' }) {
     const account = this.accounts.get(String(meterId));
-    const price = this.tariffs.get(account?.tariffId)?.price || 200;
+    const price = this.tariffs.get(source === 'b' ? account?.tariffIdB : account?.tariffId)?.price || 200;
+    this.vends.push({ meterId, source });
     const token = Array.from({ length: 20 }, () => randomInt(0, 10)).join('');
     this.receipt += 1;
     return {
@@ -108,11 +111,12 @@ export class MockGeniClient {
     for (let t = Math.floor(start / step) * step; t <= end; t += step) {
       if (step === HOUR) register += hourlyKwh(meterId, t);
       else for (let h = 0; h < 24; h++) register += hourlyKwh(meterId, t + h * HOUR);
+      const dual = this.dualSource.has(String(meterId));
       rows.push({
         meterId,
         currentDate: new Date(t).toISOString(),
-        headline: 'Total Active Energy(kWh)',
-        data: register.toFixed(2),
+        headline: dual ? 'Total Active Energy(kWh),Tariff 2 Active Energy(kWh)' : 'Total Active Energy(kWh)',
+        data: dual ? `${register.toFixed(2)},${(register * 0.4).toFixed(2)}` : register.toFixed(2),
       });
     }
     return rows;

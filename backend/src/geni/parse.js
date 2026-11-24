@@ -122,6 +122,22 @@ export function pickColumn(values, patterns) {
   return undefined;
 }
 
+/**
+ * Energy columns of a dual-source meter: source B is the column matching
+ * `sourceBPattern`; source A is the usual energy column among the rest.
+ */
+export function energyColumns(values, sourceBPattern) {
+  let b;
+  try {
+    const re = new RegExp(sourceBPattern, 'i');
+    b = Object.keys(values).find((k) => re.test(k));
+  } catch {
+    b = undefined;
+  }
+  const rest = Object.fromEntries(Object.entries(values).filter(([k]) => k !== b));
+  return { a: energyColumn(rest), b };
+}
+
 export const energyColumn = (values) => pickColumn(values, ENERGY_PATTERNS) ?? Object.keys(values)[0];
 export const voltageColumn = (values) => pickColumn(values, [/volt/i, /^u[a-c]?\b/i]);
 export const currentColumn = (values) => pickColumn(values, [/current/i, /amp/i, /^i[a-c]?\b/i]);

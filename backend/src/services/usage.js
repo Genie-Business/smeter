@@ -3,7 +3,7 @@
 import { config } from '../config.js';
 import { db } from '../db.js';
 import { geni } from '../geni/index.js';
-import { bucketConsumption, energyColumn, liveFigures, parseCurveRow, statusFlags } from '../geni/parse.js';
+import { bucketConsumption, energyColumn, energyColumns, liveFigures, parseCurveRow, statusFlags } from '../geni/parse.js';
 import { koboToNaira } from '../util/http.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -88,10 +88,23 @@ async function readings(meter, from, to) {
   return rows.map(parseCurveRow)
     .filter((r) => r.at >= start)
     .map((r) => {
-      const col = energyColumn(r.values);
-      return { at: r.at, kwh: col === undefined ? NaN : r.values[col] };
+      if (!meter.dual_source) {
+        const col = energyColumn(r.values);
+        return { at: r.at, kwh: col === undefined ? NaN : r.values[col] };
+      }
+      const { a, b } = energyColumns(r.values, config.geni.sourceBColumn);
+      return {
+        at: r.at,
+        kwh: a === undefined ? NaN : r.values[a],
+        kwhB: b === undefined ? NaN : r.values[b],
+      };
     });
 }
+
+/** Readings of source B as plain { at, kwh } rows, for bucketConsumption. */
+const sourceB = (rs) => rs.map((r) => ({ at: r.at, kwh: r.kwhB }));
+
+const sourceLabels = (meter) => ({ a: meter.source_a_label || 'Grid', b: meter.source_b_label || 'Generator' });
 
 function summarise(win, totals, nowTs) {
   // Buckets that haven't started yet are null (not 0) so charts stop at "now"
@@ -113,21 +126,22 @@ const pctChange = (cur, prev) => (prev > 0 ? round(((cur - prev) / prev) * 100, 
  * Manual-token meters send no readings, so "usage" is what was bought: units
  * vended per bucket, same shape as the meter-reading report.
  */
-export async function purchasesReport(meter, unitPriceKobo, period = 'month', anchor = new Date()) {
+export async function purchasesReport(meter, unitPriceKobo, period = 'month', anchor = new Date(), { unitPriceBKobo = 0 } = {}) {
   const nowTs = Date.now();
   const win = periodWindow(period, anchor);
   const prev = periodWindow(period, win.previous);
   const rows = await db().all(
-    `SELECT units, total_kobo, vended_at FROM purchases
+    `SELECT units, total_kobo, vended_at, source FROM purchases
      WHERE meter_id = ? AND status = 'vended' AND vended_at >= ? AND vended_at >= ? AND vended_at < ?`,
     meter.meter_id, tenancyStart(meter).toISOString(), prev.start.toISOString(), win.end.toISOString(),
   );
-  const tally = (w) => {
+  const tally = (w, only) => {
     const units = new Map();
     let spend = 0;
     for (const r of rows) {
       const at = new Date(r.vended_at);
       if (at < w.start || at >= w.end) continue;
+      if (only && r.source !== only) continue;
       const key = w.bucketOf(at);
       if (key === undefined) continue;
       units.set(key, (units.get(key) ?? 0) + (r.units ?? 0));
@@ -140,7 +154,19 @@ export async function purchasesReport(meter, unitPriceKobo, period = 'month', an
   const cur = summarise(win, curT.units, nowTs);
   const before = summarise(prev, prevT.units, nowTs);
   const purchasesCount = rows.filter((r) => new Date(r.vended_at) >= win.start).length;
+  // A dual-source meter also reports what was bought on each source.
+  const sources = meter.dual_source
+    ? (() => {
+        const parts = {};
+        for (const key of ['a', 'b']) {
+          const t = tally(win, key);
+          parts[key] = { cur: summarise(win, t.units, nowTs), before: summarise(prev, tally(prev, key).units, nowTs) };
+        }
+        return dualSources(meter, unitPriceKobo, unitPriceBKobo, parts);
+      })()
+    : null;
   return {
+    ...(sources ? { dualSource: true, sources } : {}),
     period,
     source: 'purchases',
     label: win.label,
@@ -161,8 +187,36 @@ export async function purchasesReport(meter, unitPriceKobo, period = 'month', an
   };
 }
 
-export async function usageReport(meter, unitPriceKobo, period = 'month', anchor = new Date()) {
-  if (meter.delivery_mode === 'manual') return purchasesReport(meter, unitPriceKobo, period, anchor);
+/**
+ * Per-source breakdown of a dual-source meter: each source's own series, total
+ * and cost at its own price. `parts[key]` = { cur, before } summaries.
+ */
+function dualSources(meter, unitPriceKobo, unitPriceBKobo, parts) {
+  const labels = sourceLabels(meter);
+  const price = { a: koboToNaira(unitPriceKobo), b: koboToNaira(unitPriceBKobo || unitPriceKobo) };
+  return ['a', 'b'].map((key) => {
+    const { cur, before } = parts[key];
+    return {
+      key,
+      label: labels[key],
+      prepaid: key === 'a' ? true : Boolean(meter.source_b_prepaid),
+      unitPrice: price[key],
+      points: cur.points,
+      totalKwh: cur.total,
+      avgUsageKwh: cur.avg,
+      avgUsageChangePct: pctChange(cur.avg, before.avg),
+      avgCost: round(cur.avg * price[key]),
+      totalCost: round(cur.total * price[key]),
+      previousTotalKwh: before.total,
+    };
+  });
+}
+
+/** Add two summarised series point by point (null = bucket not started yet). */
+const addPoints = (x, y) => x.map((p, i) => ({ label: p.label, kwh: p.kwh == null ? null : round(p.kwh + (y[i].kwh ?? 0)) }));
+
+export async function usageReport(meter, unitPriceKobo, period = 'month', anchor = new Date(), { unitPriceBKobo = 0 } = {}) {
+  if (meter.delivery_mode === 'manual') return purchasesReport(meter, unitPriceKobo, period, anchor, { unitPriceBKobo });
   const nowTs = Date.now();
   const win = periodWindow(period, anchor);
   const prev = periodWindow(period, win.previous);
@@ -171,9 +225,24 @@ export async function usageReport(meter, unitPriceKobo, period = 'month', anchor
   const rs = from < to ? await readings(meter, from, to) : [];
   const mode = config.geni.energyMode;
 
-  const cur = summarise(win, bucketConsumption(rs, win.bucketOf, mode), nowTs);
-  const before = summarise(prev, bucketConsumption(rs, prev.bucketOf, mode), nowTs);
+  let cur = summarise(win, bucketConsumption(rs, win.bucketOf, mode), nowTs);
+  let before = summarise(prev, bucketConsumption(rs, prev.bucketOf, mode), nowTs);
   const price = koboToNaira(unitPriceKobo);
+  let sources = null;
+  let avgCost = cur.avg * price;
+  let prevAvgCost = before.avg * price;
+  if (meter.dual_source) {
+    const rsB = sourceB(rs);
+    const curB = summarise(win, bucketConsumption(rsB, win.bucketOf, mode), nowTs);
+    const beforeB = summarise(prev, bucketConsumption(rsB, prev.bucketOf, mode), nowTs);
+    sources = dualSources(meter, unitPriceKobo, unitPriceBKobo, { a: { cur, before }, b: { cur: curB, before: beforeB } });
+    avgCost = sources[0].avgCost + sources[1].avgCost;
+    prevAvgCost = before.avg * sources[0].unitPrice + beforeB.avg * sources[1].unitPrice;
+    // The top-level series is the combined total, so a client that doesn't know
+    // about sources still shows what the premises used.
+    cur = { points: addPoints(cur.points, curB.points), total: round(cur.total + curB.total), avg: round(cur.avg + curB.avg) };
+    before = { points: addPoints(before.points, beforeB.points), total: round(before.total + beforeB.total), avg: round(before.avg + beforeB.avg) };
+  }
 
   // Project the next equal-length period from the current daily run-rate.
   const elapsedDays = Math.max(1, Math.min(nowTs, win.end) - win.start) / DAY;
@@ -191,11 +260,12 @@ export async function usageReport(meter, unitPriceKobo, period = 'month', anchor
     totalKwh: cur.total,
     avgUsageKwh: cur.avg,
     avgUsageChangePct: pctChange(cur.avg, before.avg),
-    avgCost: round(cur.avg * price),
-    avgCostChangePct: pctChange(cur.avg * price, before.avg * price),
+    avgCost: round(avgCost),
+    avgCostChangePct: pctChange(avgCost, prevAvgCost),
     previousTotalKwh: before.total,
     projectedNextKwh: projectedNext,
     unitPrice: price,
+    ...(sources ? { dualSource: true, sources } : {}),
     readings: rs.length,
     note: rs.length
       ? 'The data you see may be 24 to 36 hours old. Readings arrive from the meter network on a delay.'
@@ -219,19 +289,19 @@ export async function monthSummary(meter) {
   return { units: round(m.units), spend: koboToNaira(m.spend), purchases: m.n };
 }
 
-export async function unitsBalance(meter) {
+export async function unitsBalance(meter, source = 'a') {
   if (meter.delivery_mode === 'manual') return null; // no readings to subtract
   const since = new Date(Math.max(Date.now() - 90 * DAY, tenancyStart(meter).getTime())).toISOString();
   const row = await db().get(
     `SELECT COALESCE(SUM(units), 0) AS units, MIN(vended_at) AS first FROM purchases
-     WHERE meter_id = ? AND status = 'vended' AND kind = 'units' AND vended_at >= ?`,
-    meter.meter_id, since,
+     WHERE meter_id = ? AND status = 'vended' AND kind = 'units' AND source = ? AND vended_at >= ?`,
+    meter.meter_id, source, since,
   );
   if (!row.first) return 0;
   try {
     const rs = await readings(meter, new Date(new Date(row.first).getTime() - 2 * 60 * 60 * 1000), new Date());
     const firstTs = new Date(row.first).getTime();
-    const used = [...bucketConsumption(rs, (t) => (t.getTime() >= firstTs ? 'x' : undefined), config.geni.energyMode).values()]
+    const used = [...bucketConsumption(source === 'b' ? sourceB(rs) : rs, (t) => (t.getTime() >= firstTs ? 'x' : undefined), config.geni.energyMode).values()]
       .reduce((s, v) => s + v, 0);
     return round(Math.max(0, row.units - used));
   } catch (err) {

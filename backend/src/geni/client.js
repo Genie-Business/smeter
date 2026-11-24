@@ -130,7 +130,7 @@ export class GeniClient {
    * meter that already has an account keeps it (and its customer); only its
    * tariff and region change. Returns the customer id the meter is billed under.
    */
-  async bindAccount({ customerId, meterId, region, tariffId }, existing) {
+  async bindAccount({ customerId, meterId, region, tariffId, tariffIdB }, existing) {
     const account = existing === undefined ? await this.getAccount(meterId) : existing;
     const billedTo = account?.customerId ?? customerId;
     // "region" refers to a head-end region record (by default the operator
@@ -143,7 +143,8 @@ export class GeniClient {
       tariffId,
       // Required by the head-end on update (it errors without them, although the
       // API collection doesn't list them): the second-rate tariff and CT ratio.
-      tariffS2: tariffId,
+      // The second-rate tariff prices source B on a dual-source meter (S2 tokens).
+      tariffS2: tariffIdB ?? tariffId,
       ctRatio: account?.ctRatio ?? '1',
       remark: 'smeter',
     });
@@ -158,8 +159,8 @@ export class GeniClient {
     await this.raw(exists ? '/API/Tariff/Update' : '/API/Tariff/Create', [row]);
   }
 
-  async vendCredit({ meterId, amountNaira, serialNumber }) {
-    const r = await this.raw('/API/Token/CreditToken/Generate', this.base({
+  async vendCredit({ meterId, amountNaira, serialNumber, source = 'a' }) {
+    const r = await this.raw(source === 'b' ? '/API/Token/CreditToken/GenerateS2' : '/API/Token/CreditToken/Generate', this.base({
       meterId,
       amount: amountNaira,
       isPreview: false,

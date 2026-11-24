@@ -24,15 +24,26 @@ export function newReference() {
   return `SM${Date.now().toString(36).toUpperCase()}${randomBytes(4).toString('hex').toUpperCase()}`;
 }
 
-export async function quoteFor(meter, landlord, amountKobo, params, { initiatedBy = 'tenant' } = {}) {
+/** Price per kWh for a source; source B is only sold when the owner made it prepaid and priced it. */
+export function sourcePrice(meter, landlord, source = 'a') {
+  if (source !== 'b') return landlord.unit_price_kobo;
+  if (!meter.dual_source || !meter.source_b_prepaid) throw badRequest(`${meter.source_b_label || 'This source'} isn’t sold as prepaid on this meter`);
+  if (!(landlord.unit_price_b_kobo > 0)) throw conflict(`Your landlord has not set a price for ${meter.source_b_label || 'this source'} yet`);
+  return landlord.unit_price_b_kobo;
+}
+
+export async function quoteFor(meter, landlord, amountKobo, params, { initiatedBy = 'tenant', source = 'a' } = {}) {
+  const b = source === 'b';
+  // Source B (the owner's own supply, e.g. a generator): no utility base cost, and the
+  // tenant's grid debt and the meter's GPRS service charge stay on source A purchases.
   return quote({
     amountKobo,
-    unitPriceKobo: landlord.unit_price_kobo,
-    baseCostKobo: Math.round((await getTariffSettings()).baseUnitCostNaira * 100),
+    unitPriceKobo: sourcePrice(meter, landlord, source),
+    baseCostKobo: b ? 0 : Math.round((await getTariffSettings()).baseUnitCostNaira * 100),
     feeBearer: landlord.fee_bearer,
-    debtKobo: meter.debt_kobo,
-    debtPercent: meter.debt_recovery_percent,
-    service: await serviceInput(meter, { initiatedBy }),
+    debtKobo: b ? 0 : meter.debt_kobo,
+    debtPercent: b ? 0 : meter.debt_recovery_percent,
+    service: b ? null : await serviceInput(meter, { initiatedBy }),
   }, params ?? (await paymentParams()));
 }
 
@@ -90,7 +101,7 @@ export async function createServicePayment({ meter, landlord, channel }) {
   return { reference, authorizationUrl: init.authorizationUrl, amount: due, fee: total - due, total };
 }
 
-export async function createPurchase({ meter, landlord, amountKobo, initiatedBy, email, channel }) {
+export async function createPurchase({ meter, landlord, amountKobo, initiatedBy, email, channel, source = 'a' }) {
   if (meter.status !== 'active' && initiatedBy === 'tenant') throw badRequest('This meter is not active yet');
   // Never take real money for tokens from the simulated head-end.
   await requireLiveHeadEnd();
@@ -105,17 +116,17 @@ export async function createPurchase({ meter, landlord, amountKobo, initiatedBy,
   if (channel && !params.channels.includes(channel)) {
     throw badRequest('That payment method isn’t available right now. Choose another one.');
   }
-  const q = await quoteFor(meter, landlord, amountKobo, params, { initiatedBy });
+  const q = await quoteFor(meter, landlord, amountKobo, params, { initiatedBy, source });
   const reference = newReference();
 
   await db().run(
     `INSERT INTO purchases (reference, meter_id, landlord_id, initiated_by, amount_kobo, debt_kobo, energy_kobo,
        fee_kobo, fee_bearer, total_kobo, landlord_net_kobo, unit_price_kobo, base_cost_kobo, provider,
-       service_kobo, service_owner_kobo, service_days)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       service_kobo, service_owner_kobo, service_days, source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     reference, meter.meter_id, landlord.id, initiatedBy, q.amountKobo, q.debtKobo, q.energyKobo,
-    q.feeKobo, q.feeBearer, q.totalKobo, q.landlordNetKobo, landlord.unit_price_kobo, q.baseKobo, payments().name,
-    q.serviceKobo, q.serviceOwnerKobo, q.serviceDays,
+    q.feeKobo, q.feeBearer, q.totalKobo, q.landlordNetKobo, sourcePrice(meter, landlord, source), q.baseKobo, payments().name,
+    q.serviceKobo, q.serviceOwnerKobo, q.serviceDays, source,
   );
 
   const init = await startCheckout(reference, {
@@ -213,6 +224,7 @@ export async function vend(reference) {
       meterId: p.meter_id,
       amountNaira: koboToNaira(p.energy_kobo),
       serialNumber: p.reference,
+      source: p.source,
     });
   } catch (err) {
     await setStatus(reference, 'vending', 'paid', { failure_reason: `Token generation failed: ${err.message}` });
@@ -286,6 +298,7 @@ export function purchaseDto(p, { includeToken = true } = {}) {
     meterId: p.meter_id,
     status: p.status,
     kind: p.kind ?? 'units',
+    source: p.source ?? 'a',
     initiatedBy: p.initiated_by,
     amount: koboToNaira(p.amount_kobo),
     debtRecovered: koboToNaira(p.debt_kobo),

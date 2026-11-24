@@ -36,6 +36,7 @@ export function landlordDto(l) {
         }
       : null,
     unitPrice: koboToNaira(l.unit_price_kobo),
+    unitPriceB: koboToNaira(l.unit_price_b_kobo ?? 0), // second power source (dual-source meters)
     feeBearer: l.fee_bearer,
     payoutSchedule: l.payout_schedule ?? 'daily',
     setup: ownerSetup(l),
@@ -47,6 +48,20 @@ export function landlordDto(l) {
       gprsFeeSinglePhase: tariffNow().gprsFeeSinglePhaseNaira,
       gprsFeeThreePhase: tariffNow().gprsFeeThreePhaseNaira,
     },
+  };
+}
+
+/** The power sources a meter measures: one, or two with the dual-source accessory. */
+export function sourcesDto(m) {
+  const dual = Boolean(m.dual_source);
+  return {
+    dualSource: dual,
+    sources: dual
+      ? [
+          { key: 'a', label: m.source_a_label || 'Grid', prepaid: true },
+          { key: 'b', label: m.source_b_label || 'Generator', prepaid: Boolean(m.source_b_prepaid) },
+        ]
+      : [{ key: 'a', label: m.source_a_label || 'Grid', prepaid: true }],
   };
 }
 
@@ -67,6 +82,7 @@ export function meterDto(m) {
     debtRecoveryPercent: m.debt_recovery_percent,
     relayState: m.relay_state,
     deliveryMode: m.delivery_mode,
+    ...sourcesDto(m),
     service: serviceDto(m, { forOwner: true }),
     createdAt: m.created_at,
   };
@@ -86,11 +102,13 @@ export function tenantDto(m, landlord) {
     debtRecoveryPercent: m.debt_recovery_percent,
     relayState: m.relay_state,
     deliveryMode: m.delivery_mode,
+    ...sourcesDto(m),
     service: serviceDto(m),
     landlord: landlord
       ? { name: landlord.full_name, phone: landlord.phone }
       : null,
     unitPrice: landlord ? koboToNaira(landlord.unit_price_kobo) : 0,
+    unitPriceB: landlord ? koboToNaira(landlord.unit_price_b_kobo ?? 0) : 0,
     feeBearer: landlord?.fee_bearer ?? 'tenant',
   };
 }
