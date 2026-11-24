@@ -96,6 +96,10 @@ class LandlordRepository {
   Future<Landlord> setUnitPrice(double price) async =>
       Landlord.fromJson(_m((await _api.put('/v1/landlord/tariff', {'unitPrice': price}))['landlord']));
 
+  /// Price of the second power source on dual-source meters.
+  Future<Landlord> setUnitPriceB(double price) async =>
+      Landlord.fromJson(_m((await _api.put('/v1/landlord/tariff', {'unitPriceB': price}))['landlord']));
+
   Future<Landlord> setFeeBearer(String bearer) async =>
       Landlord.fromJson(_m((await _api.put('/v1/landlord/fee-bearer', {'feeBearer': bearer}))['landlord']));
 
@@ -162,9 +166,15 @@ class LandlordRepository {
     return (r['data'] as List).map((p) => Purchase.fromJson(_m(p))).toList();
   }
 
-  Future<Checkout> buyFor(String meterId, double amount, {String? channel}) async => Checkout.fromJson(
-    await _api.post('/v1/landlord/purchases', {'meterId': meterId, 'amount': amount, 'channel': ?channel}),
-  );
+  Future<Checkout> buyFor(String meterId, double amount, {String? channel, String source = 'a'}) async =>
+      Checkout.fromJson(
+        await _api.post('/v1/landlord/purchases', {
+          'meterId': meterId,
+          'amount': amount,
+          'channel': ?channel,
+          'source': source,
+        }),
+      );
 
   Future<Purchase> purchase(String reference) async =>
       Purchase.fromJson(_m((await _api.get('/v1/landlord/purchases/$reference'))['purchase']));

@@ -7,6 +7,7 @@ import '../../core/models.dart';
 import '../../shared/widgets.dart';
 import '../../theme/smeter_theme.dart';
 import '../payments/buy_power_screen.dart';
+import '../payments/source_picker.dart';
 import 'landlord_repository.dart';
 
 /// "Make a payment": pick one of your meters, then buy units for it.
@@ -55,6 +56,14 @@ Future<void> openMakePayment(BuildContext context, WidgetRef ref, Landlord landl
   }
   if (target == null || !context.mounted) return;
   final repo = ref.read(landlordRepositoryProvider);
+  var source = 'a';
+  var label = '';
+  if (target.dualSource && target.sourceB.prepaid) {
+    final picked = await pickPowerSource(context, [target.sourceA, target.sourceB], {'a': landlord.unitPrice, 'b': landlord.unitPriceB});
+    if (picked == null || !context.mounted) return;
+    source = picked.key;
+    label = ' · ${picked.label}';
+  }
   // Latest payment options from the admin; refreshed in the background for next time.
   final content = ref.read(appContentProvider).value ?? AppContent.defaults;
   ref.invalidate(appContentProvider);
@@ -62,11 +71,11 @@ Future<void> openMakePayment(BuildContext context, WidgetRef ref, Landlord landl
   await Navigator.of(context, rootNavigator: true).push(
     MaterialPageRoute(
       builder: (_) => BuyPowerScreen(
-        title: 'Make a payment',
+        title: 'Make a payment$label',
         subtitle: 'Buying units for ${m.tenantName} · ${m.label}',
-        unitPrice: landlord.unitPrice,
+        unitPrice: source == 'b' ? landlord.unitPriceB : landlord.unitPrice,
         deliveryMode: m.deliveryMode,
-        start: (amount, channel) => repo.buyFor(m.meterId, amount, channel: channel),
+        start: (amount, channel) => repo.buyFor(m.meterId, amount, channel: channel, source: source),
         load: repo.purchase,
         presets: content.presets,
         minAmount: content.payments.minPurchase,

@@ -178,12 +178,23 @@ class _HeroCard extends StatelessWidget {
           ]),
           const SizedBox(height: 4),
           Text('Bought minus what your meter has used. Updates as readings arrive.', style: SmeterText.caption()),
+          // Dual-source meter with the second supply sold prepaid: its own balance.
+          if (t.prepaidSourceB != null && dash.pointsB != null) ...[
+            const SizedBox(height: Space.md),
+            Text('${t.prepaidSourceB!.label.toUpperCase()} UNITS LEFT', style: SmeterText.overline()),
+            const SizedBox(height: 4),
+            Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+              Text(units(dash.pointsB), style: SmeterText.title1(color: SmeterColors.info)),
+              const SizedBox(width: 6),
+              Text('kWh', style: SmeterText.title3(color: SmeterColors.muted)),
+            ]),
+          ],
         ],
         const SizedBox(height: Space.lg),
         FilledButton.icon(
           onPressed: onBuy,
           icon: const Icon(Icons.bolt_rounded),
-          label: Text(t.unitPrice > 0 ? 'Buy power · ${naira(t.unitPrice)}/kWh' : 'Buy power'),
+          label: Text(t.dualSource ? 'Buy power' : (t.unitPrice > 0 ? 'Buy power · ${naira(t.unitPrice)}/kWh' : 'Buy power')),
         ),
       ]),
     );

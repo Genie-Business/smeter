@@ -10,6 +10,7 @@ import '../../core/format.dart';
 import '../../core/models.dart';
 import '../../shared/widgets.dart';
 import '../../theme/smeter_theme.dart';
+import '../payments/source_picker.dart';
 import 'tenant_actions.dart';
 import 'tenant_repository.dart';
 
@@ -107,6 +108,13 @@ class _UsageScreenState extends ConsumerState<UsageScreen> {
                     ]),
                   ),
                   _ChartCard(report: r),
+                  if (r.isDual) ...[
+                    const SizedBox(height: Space.md),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: Space.lg),
+                      child: _SourceBreakdown(sources: r.sources, bought: r.fromPurchases),
+                    ),
+                  ],
                   const SizedBox(height: Space.md),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: Space.lg),
@@ -190,10 +198,45 @@ class _ChartCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pts = report.points;
-    final maxY = pts.fold<double>(0, (m, p) => math.max(m, p.kwh ?? 0));
+    // A dual-source meter draws each supply as its own line; the headline stays the total.
+    final split = report.isDual && !report.fromPurchases;
+    final series = split
+        ? [for (final s in report.sources) (label: s.label, color: sourceColor(s.key), points: s.points)]
+        : [(label: '', color: SmeterColors.primary, points: pts)];
+    final maxY = series.fold<double>(0, (m, s) => s.points.fold(m, (m2, p) => math.max(m2, p.kwh ?? 0)));
     final top = maxY <= 0 ? 1.0 : maxY * 1.2;
     final every = math.max(1, (pts.length / 8).ceil());
-    final lastIndex = pts.lastIndexWhere((p) => p.kwh != null);
+
+    LineChartBarData bar(List<UsagePoint> p, Color color, {required bool area}) {
+      final last = p.lastIndexWhere((x) => x.kwh != null);
+      return LineChartBarData(
+        spots: [
+          for (var i = 0; i < p.length; i++)
+            if (p[i].kwh != null) FlSpot(i.toDouble(), p[i].kwh!),
+        ],
+        isCurved: true,
+        preventCurveOverShooting: true,
+        color: color,
+        barWidth: 3,
+        belowBarData: BarAreaData(
+          show: area,
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [color.withValues(alpha: 0.22), color.withValues(alpha: 0)],
+          ),
+        ),
+        dotData: FlDotData(
+          checkToShowDot: (spot, _) => spot.x.toInt() == last,
+          getDotPainter: (_, _, _, _) => FlDotCirclePainter(
+            radius: 5,
+            color: split ? color : SmeterColors.green,
+            strokeWidth: 2,
+            strokeColor: Colors.white,
+          ),
+        ),
+      );
+    }
 
     Widget bottomLabel(double v, TitleMeta meta) {
       final i = v.toInt();
@@ -231,6 +274,17 @@ class _ChartCard extends StatelessWidget {
             Text('kWh ${report.fromPurchases ? 'bought' : 'used'}', style: SmeterText.small()),
           ]),
         ),
+        if (split) ...[
+          const SizedBox(height: Space.sm),
+          Wrap(spacing: Space.lg, children: [
+            for (final s in series)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                Container(width: 10, height: 10, decoration: BoxDecoration(color: s.color, shape: BoxShape.circle)),
+                const SizedBox(width: 6),
+                Text(s.label, style: SmeterText.small()),
+              ]),
+          ]),
+        ],
         const SizedBox(height: Space.lg),
         SizedBox(
           height: 180,
@@ -279,41 +333,13 @@ class _ChartCard extends StatelessWidget {
                           getTooltipColor: (_) => SmeterColors.ink,
                           getTooltipItems: (spots) => spots
                               .map((s) => LineTooltipItem(
-                                    '${pts[s.x.toInt()].label}\n${s.y.toStringAsFixed(2)} kWh',
+                                    '${split ? '${series[s.barIndex].label} · ' : ''}${pts[s.x.toInt()].label}\n${s.y.toStringAsFixed(2)} kWh',
                                     const TextStyle(color: Colors.white, fontSize: 12),
                                   ))
                               .toList(),
                         ),
                       ),
-                      lineBarsData: [
-                        LineChartBarData(
-                          spots: [
-                            for (var i = 0; i < pts.length; i++)
-                              if (pts[i].kwh != null) FlSpot(i.toDouble(), pts[i].kwh!),
-                          ],
-                          isCurved: true,
-                          preventCurveOverShooting: true,
-                          color: SmeterColors.primary,
-                          barWidth: 3,
-                          belowBarData: BarAreaData(
-                            show: true,
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [SmeterColors.primary.withValues(alpha: 0.22), SmeterColors.primary.withValues(alpha: 0)],
-                            ),
-                          ),
-                          dotData: FlDotData(
-                            checkToShowDot: (spot, _) => spot.x.toInt() == lastIndex,
-                            getDotPainter: (_, _, _, _) => FlDotCirclePainter(
-                              radius: 5,
-                              color: SmeterColors.green,
-                              strokeWidth: 2,
-                              strokeColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
+                      lineBarsData: [for (final s in series) bar(s.points, s.color, area: !split)],
                     )),
         ),
       ]),
@@ -359,6 +385,38 @@ class _PurchaseStats extends StatelessWidget {
         StatTile(label: 'Purchases', value: '${r.purchasesCount}', icon: Icons.receipt_long_outlined),
         StatTile(label: 'Previous period', value: kwh(r.previousTotalKwh), icon: Icons.history_rounded),
       ]);
+}
+
+/// Each power source's energy and cost for the period, at its own price.
+class _SourceBreakdown extends StatelessWidget {
+  const _SourceBreakdown({required this.sources, required this.bought});
+
+  final List<UsageSource> sources;
+  final bool bought;
+
+  @override
+  Widget build(BuildContext context) => AppCard(
+        margin: EdgeInsets.zero,
+        child: Column(children: [
+          for (var i = 0; i < sources.length; i++) ...[
+            if (i > 0) const Divider(height: Space.lg),
+            Row(children: [
+              Container(width: 10, height: 10, decoration: BoxDecoration(color: sourceColor(sources[i].key), shape: BoxShape.circle)),
+              const SizedBox(width: Space.sm),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(sources[i].label, style: SmeterText.bodyStrong()),
+                  Text('${naira(sources[i].unitPrice)} per kWh', style: SmeterText.caption()),
+                ]),
+              ),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('${kwh(sources[i].totalKwh)}${bought ? ' bought' : ''}', style: SmeterText.bodyStrong()),
+                Text(naira(sources[i].totalCost), style: SmeterText.caption()),
+              ]),
+            ]),
+          ],
+        ]),
+      );
 }
 
 class _Grid extends StatelessWidget {

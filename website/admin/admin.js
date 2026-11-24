@@ -38,6 +38,7 @@ const humanize = (k) => String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[
 const STATUS_TONE = { vended: 'ok', pending: 'warn', paid: 'info', vending: 'info', failed: 'bad', abandoned: '', active: 'ok', invited: 'warn', new: 'brand', contacted: 'info', surveyed: 'info', onboarded: 'ok', closed: '' };
 const statusPill = (s) => html`<span class="pill ${STATUS_TONE[s] ?? ''}">${humanize(s)}</span>`;
 const PAYOUT_LABEL = { daily: 'Daily (every working day)', weekly: 'Weekly', monthly: 'Monthly' };
+const sourcesPill = (m) => (m.dualSource ? html`<span class="pill ok" title="${m.sources.map((s) => `${s.label}${s.prepaid ? ' (prepaid)' : ''}`).join(' + ')}">2 sources</span>` : '');
 const modePill = (m) => (m === 'manual' ? html`<span class="pill warn">Manual token</span>` : html`<span class="pill info">GPRS</span>`);
 
 // API
@@ -377,7 +378,7 @@ async function metersList(main, _x, state = { page: 1, search: '', mode: '', sta
       <tbody>${r.data.length ? r.data.map((m) => html`<tr class="link" data-href="#/meters/${m.meterId}">
         <td class="mono">${m.meterId}<div class="muted" style="font-family:var(--font)">${m.address}${m.apartment ? `, Apt ${m.apartment}` : ''}</div></td>
         <td>${m.landlordName}</td><td>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '-'}<div class="muted">${m.tenant.phone}</div></td>
-        <td>${modePill(m.deliveryMode)}</td><td>${statusPill(m.status)} ${m.relayState.startsWith('disconnect') ? html`<span class="pill bad">Off</span>` : ''}</td>
+        <td>${modePill(m.deliveryMode)} ${sourcesPill(m)}</td><td>${statusPill(m.status)} ${m.relayState.startsWith('disconnect') ? html`<span class="pill bad">Off</span>` : ''}</td>
         <td class="r num">${nairaWhole(m.spent)}</td><td>${date(m.lastPurchase)}</td></tr>`) : html`<tr><td colspan="7" class="empty">No meters match.</td></tr>`}</tbody>
     </table></div>`);
   pager(main, r, (page) => metersList(main, null, { ...state, page }));
@@ -398,7 +399,7 @@ async function meterDetail(main, meterId) {
   render(main, html`
     <a class="crumb" href="#/meters">← Meters</a>
     <div class="page-head"><div><h1 class="mono" style="font-size:24px">${m.meterId}</h1><p>${m.address}${m.apartment ? `, Apt ${m.apartment}` : ''}</p></div>
-      <div style="display:flex;gap:6px">${modePill(m.deliveryMode)} ${statusPill(m.status)}</div></div>
+      <div style="display:flex;gap:6px">${modePill(m.deliveryMode)} ${sourcesPill(m)} ${statusPill(m.status)}</div></div>
     <div class="grid g3">
       <div class="card"><h2>Tenant</h2><dl class="kv">
         <dt>Name</dt><dd>${[m.tenant.firstName, m.tenant.lastName].filter(Boolean).join(' ') || '-'}</dd>

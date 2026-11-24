@@ -316,6 +316,10 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
   final _percent = TextEditingController(text: '10');
   String _mode = 'ota';
   String _servicePayer = 'owner';
+  bool _dualSource = false;
+  bool _prepaidB = false;
+  final _labelA = TextEditingController(text: 'Grid');
+  final _labelB = TextEditingController(text: 'Generator');
   bool _recoverDebt = false;
   MeterCheck? _check;
   String? _checkedId;
@@ -347,7 +351,7 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
 
   @override
   void dispose() {
-    for (final c in [_meter, _address, _apartment, _phone, _email, _first, _last, _debt, _percent]) {
+    for (final c in [_meter, _address, _apartment, _phone, _email, _first, _last, _debt, _percent, _labelA, _labelB]) {
       c.dispose();
     }
     super.dispose();
@@ -364,6 +368,12 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
         'tenantEmail': _email.text.trim(),
         'deliveryMode': _mode,
         if (_mode == 'ota') 'servicePayer': _servicePayer,
+        if (_dualSource) ...{
+          'dualSource': true,
+          'sourceALabel': _labelA.text.trim().isEmpty ? 'Grid' : _labelA.text.trim(),
+          'sourceBLabel': _labelB.text.trim().isEmpty ? 'Generator' : _labelB.text.trim(),
+          'sourceBPrepaid': _prepaidB,
+        },
         if (_first.text.trim().isNotEmpty) 'tenantFirstName': _first.text.trim(),
         if (_last.text.trim().isNotEmpty) 'tenantLastName': _last.text.trim(),
         if (_recoverDebt) 'debtAmount': double.tryParse(_debt.text) ?? 0,
@@ -480,6 +490,45 @@ class _AddMeterScreenState extends ConsumerState<AddMeterScreen> {
               ),
             ),
           ],
+          const SectionHeader('Power sources'),
+          AppCard(
+            child: Column(children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Two power sources on this meter'),
+                subtitle: const Text('Our meter accessory measures a second supply (e.g. a generator) separately.'),
+                value: _dualSource,
+                onChanged: (v) => setState(() {
+                  _dualSource = v;
+                  if (!v) _prepaidB = false;
+                }),
+              ),
+              if (_dualSource) ...[
+                const SizedBox(height: Space.sm),
+                TextFormField(
+                  controller: _labelA,
+                  maxLength: 24,
+                  decoration: const InputDecoration(labelText: 'Main supply name', hintText: 'Grid'),
+                ),
+                TextFormField(
+                  controller: _labelB,
+                  maxLength: 24,
+                  decoration: const InputDecoration(labelText: 'Second source name', hintText: 'Generator, Solar…'),
+                ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Sell the second source as prepaid units'),
+                  subtitle: Text(
+                    ref.watch(landlordProfileProvider).value?.unitPriceB == 0
+                        ? 'Set its price first (Price per unit).'
+                        : 'The tenant buys tokens for it, priced separately.',
+                  ),
+                  value: _prepaidB,
+                  onChanged: (v) => setState(() => _prepaidB = v),
+                ),
+              ],
+            ]),
+          ),
           const SectionHeader('Tenant'),
           AppCard(
             child: Column(children: [
@@ -653,6 +702,36 @@ class MeterDetailScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: Space.lg),
               child: DeliveryModePicker(value: m.deliveryMode, onChanged: (v) => _changeMode(context, ref, m, v)),
             ),
+            const SectionHeader('Power sources'),
+            AppCard(
+              child: Column(children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Two power sources'),
+                  subtitle: const Text('The meter accessory measures a second supply separately.'),
+                  value: m.dualSource,
+                  onChanged: (v) => _patchSources(context, ref, m, {'dualSource': v}),
+                ),
+                if (m.dualSource) ...[
+                  KeyValueRow('Main supply', m.sourceA.label),
+                  KeyValueRow('Second source', m.sourceB.label),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Sell the second source prepaid'),
+                    value: m.sourceB.prepaid,
+                    onChanged: (v) => _patchSources(context, ref, m, {'sourceBPrepaid': v}),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () => _editSourceNames(context, ref, m),
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('Rename sources'),
+                    ),
+                  ),
+                ],
+              ]),
+            ),
             if (m.service != null && (!m.isManual || m.service!.due > 0 || m.service!.ownerDue > 0)) ...[
               const SectionHeader('GPRS service charge'),
               if (!m.isManual)
@@ -765,6 +844,41 @@ class MeterDetailScreen extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) showError(context, e);
     }
+  }
+
+  Future<void> _patchSources(BuildContext context, WidgetRef ref, Meter m, Map<String, dynamic> body) async {
+    try {
+      await ref.read(landlordRepositoryProvider).updateMeter(m.meterId, body);
+      ref.invalidate(meterDetailProvider(m.meterId));
+      ref.invalidate(metersProvider);
+    } catch (e) {
+      if (context.mounted) showError(context, e);
+    }
+  }
+
+  Future<void> _editSourceNames(BuildContext context, WidgetRef ref, Meter m) async {
+    final a = TextEditingController(text: m.sourceA.label);
+    final b = TextEditingController(text: m.sourceB.label);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Rename power sources'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: a, maxLength: 24, decoration: const InputDecoration(labelText: 'Main supply')),
+          TextField(controller: b, maxLength: 24, decoration: const InputDecoration(labelText: 'Second source')),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+    final nameA = a.text.trim();
+    final nameB = b.text.trim();
+    a.dispose();
+    b.dispose();
+    if (ok != true || nameA.isEmpty || nameB.isEmpty || !context.mounted) return;
+    await _patchSources(context, ref, m, {'sourceALabel': nameA, 'sourceBLabel': nameB});
   }
 
   Future<void> _changeMode(BuildContext context, WidgetRef ref, Meter m, String mode) async {

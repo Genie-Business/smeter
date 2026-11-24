@@ -72,4 +72,35 @@ void main() {
     expect(m.label, 'Apt 1 · 470012');
     expect(m.tenantName, 'Tenant');
   });
+
+  test('dual-source usage report and meter parse', () {
+    final r = UsageReport.fromJson({
+      'period': 'week',
+      'label': 'Week of 16 Nov',
+      'points': [{'label': 'Mon', 'kwh': 5.0}],
+      'totalKwh': 5.0,
+      'dualSource': true,
+      'sources': [
+        {'key': 'a', 'label': 'Grid', 'prepaid': true, 'unitPrice': 200, 'points': [{'label': 'Mon', 'kwh': 3.0}], 'totalKwh': 3.0, 'totalCost': 600},
+        {'key': 'b', 'label': 'Solar', 'prepaid': false, 'unitPrice': 150, 'points': [{'label': 'Mon', 'kwh': 2.0}], 'totalKwh': 2.0, 'totalCost': 300},
+      ],
+    });
+    expect(r.isDual, isTrue);
+    expect(r.sources[1].label, 'Solar');
+    expect(r.sources[1].totalCost, 300);
+
+    final m = Meter.fromJson({
+      'meterId': '1',
+      'status': 'active',
+      'dualSource': true,
+      'sources': [
+        {'key': 'a', 'label': 'Grid', 'prepaid': true},
+        {'key': 'b', 'label': 'Solar', 'prepaid': true},
+      ],
+    });
+    expect(m.dualSource, isTrue);
+    expect(m.sourceB.label, 'Solar');
+    expect(m.sourceB.prepaid, isTrue);
+    expect(Meter.fromJson({'meterId': '2', 'status': 'active'}).dualSource, isFalse);
+  });
 }

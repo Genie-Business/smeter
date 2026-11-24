@@ -398,11 +398,13 @@ class SetUnitPriceScreen extends ConsumerStatefulWidget {
 
 class _SetUnitPriceScreenState extends ConsumerState<SetUnitPriceScreen> {
   final _price = TextEditingController();
+  final _priceB = TextEditingController();
   bool _loaded = false;
 
   @override
   void dispose() {
     _price.dispose();
+    _priceB.dispose();
     super.dispose();
   }
 
@@ -414,6 +416,10 @@ class _SetUnitPriceScreenState extends ConsumerState<SetUnitPriceScreen> {
     }
     try {
       await ref.read(landlordRepositoryProvider).setUnitPrice(v);
+      final vb = double.tryParse(_priceB.text);
+      if (vb != null && vb > 0 && vb != ref.read(landlordProfileProvider).value?.unitPriceB) {
+        await ref.read(landlordRepositoryProvider).setUnitPriceB(vb);
+      }
       ref.invalidate(landlordProfileProvider);
       ref.invalidate(landlordDashboardProvider);
       if (!mounted) return;
@@ -429,6 +435,7 @@ class _SetUnitPriceScreenState extends ConsumerState<SetUnitPriceScreen> {
     final me = ref.watch(landlordProfileProvider).value;
     if (me != null && !_loaded) {
       if (me.unitPrice > 0) _price.text = me.unitPrice.toStringAsFixed(2);
+      if (me.unitPriceB > 0) _priceB.text = me.unitPriceB.toStringAsFixed(2);
       _loaded = true;
     }
     final price = double.tryParse(_price.text);
@@ -484,6 +491,20 @@ class _SetUnitPriceScreenState extends ConsumerState<SetUnitPriceScreen> {
               ),
             ]),
           ),
+        const SizedBox(height: Space.xl),
+        Text('Second power source (optional)', style: SmeterText.title3()),
+        const SizedBox(height: Space.xs),
+        Text(
+          'For meters with our two-source accessory (e.g. a generator). Tenants pay this per kWh on that source. The utility minimum doesn’t apply.',
+          style: SmeterText.small(),
+        ),
+        const SizedBox(height: Space.sm),
+        TextField(
+          controller: _priceB,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+          decoration: const InputDecoration(labelText: 'Price per kWh', prefixText: '₦ '),
+        ),
         if (tooHigh)
           InfoBanner(
             icon: Icons.gavel_rounded,

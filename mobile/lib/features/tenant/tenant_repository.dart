@@ -7,6 +7,7 @@ class TenantDashboard {
   TenantDashboard(Map<String, dynamic> j)
     : tenant = TenantProfile.fromJson(Map<String, dynamic>.from(j['tenant'] as Map)),
       points = (j['points'] as num?)?.toDouble(),
+      pointsB = (j['pointsB'] as num?)?.toDouble(),
       monthUnits = ((j['month'] as Map?)?['units'] as num? ?? 0).toDouble(),
       monthSpend = ((j['month'] as Map?)?['spend'] as num? ?? 0).toDouble(),
       monthPurchases = (j['month'] as Map?)?['purchases'] as int? ?? 0,
@@ -18,6 +19,9 @@ class TenantDashboard {
 
   /// Estimated kWh left (GPRS meters only; null for manual-token meters).
   final double? points;
+
+  /// Estimated kWh left on the second source (prepaid dual-source meters only).
+  final double? pointsB;
   final double monthUnits;
   final double monthSpend;
   final int monthPurchases;
@@ -45,12 +49,13 @@ class TenantRepository {
   Future<UsageReport> usage(String period, DateTime date) async =>
       UsageReport.fromJson(await _api.get('/v1/tenant/usage', query: {'period': period, 'date': _ymd(date)}));
 
-  Future<Quote> quote(double amount) async => Quote.fromJson(
-    Map<String, dynamic>.from((await _api.post('/v1/tenant/quote', {'amount': amount}))['quote'] as Map),
+  Future<Quote> quote(double amount, {String source = 'a'}) async => Quote.fromJson(
+    Map<String, dynamic>.from((await _api.post('/v1/tenant/quote', {'amount': amount, 'source': source}))['quote'] as Map),
   );
 
-  Future<Checkout> buy(double amount, {String? channel}) async =>
-      Checkout.fromJson(await _api.post('/v1/tenant/purchases', {'amount': amount, 'channel': ?channel}));
+  Future<Checkout> buy(double amount, {String? channel, String source = 'a'}) async => Checkout.fromJson(
+    await _api.post('/v1/tenant/purchases', {'amount': amount, 'channel': ?channel, 'source': source}),
+  );
 
   /// Pay the outstanding GPRS service charge on its own.
   Future<Checkout> payServiceCharge({String? channel}) async =>

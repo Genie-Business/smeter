@@ -2,12 +2,34 @@
 
 double? _d(Object? v) => v == null ? null : (v as num).toDouble();
 
+/// A power source a meter measures: one normally, two with the dual-source accessory.
+class PowerSource {
+  const PowerSource({required this.key, required this.label, required this.prepaid});
+
+  PowerSource.fromJson(Map<String, dynamic> j)
+    : key = j['key'] as String? ?? 'a',
+      label = j['label'] as String? ?? 'Grid',
+      prepaid = j['prepaid'] as bool? ?? true;
+
+  /// 'a' (the meter's main supply) or 'b' (the accessory's).
+  final String key;
+  final String label;
+
+  /// Whether this source is sold as prepaid tokens (source A always is).
+  final bool prepaid;
+
+  static List<PowerSource> listFrom(Object? j) => [
+    for (final s in (j as List? ?? const [])) PowerSource.fromJson(Map<String, dynamic>.from(s as Map)),
+  ];
+}
+
 class Purchase {
   Purchase.fromJson(Map<String, dynamic> j)
     : reference = j['reference'] as String,
       meterId = j['meterId'] as String,
       status = j['status'] as String,
       kind = j['kind'] as String? ?? 'units',
+      source = j['source'] as String? ?? 'a',
       initiatedBy = j['initiatedBy'] as String? ?? 'tenant',
       amount = _d(j['amount']) ?? 0,
       debtRecovered = _d(j['debtRecovered']) ?? 0,
@@ -35,6 +57,9 @@ class Purchase {
 
   /// 'units' (a power purchase) or 'service' (the GPRS service charge on its own).
   final String kind;
+
+  /// Which power source the units are for ('a' main, 'b' second source).
+  final String source;
   final String initiatedBy;
   final double amount;
   final double debtRecovered;
@@ -130,8 +155,11 @@ class TenantProfile {
       landlordName = (j['landlord'] as Map?)?['name'] as String?,
       landlordPhone = (j['landlord'] as Map?)?['phone'] as String?,
       unitPrice = _d(j['unitPrice']) ?? 0,
+      unitPriceB = _d(j['unitPriceB']) ?? 0,
       feeBearer = j['feeBearer'] as String? ?? 'tenant',
       deliveryMode = j['deliveryMode'] as String? ?? 'ota',
+      dualSource = j['dualSource'] as bool? ?? false,
+      sources = PowerSource.listFrom(j['sources']),
       service = MeterService.from(j['service']);
 
   final String meterId;
@@ -147,13 +175,29 @@ class TenantProfile {
   final String? landlordName;
   final String? landlordPhone;
   final double unitPrice;
+
+  /// Price per kWh on the second source (dual-source meters).
+  final double unitPriceB;
   final String feeBearer;
 
   /// 'ota' (tokens pushed over GPRS) or 'manual' (keyed into the meter remote).
   final String deliveryMode;
+
+  /// True when the meter has the accessory metering a second power source.
+  final bool dualSource;
+  final List<PowerSource> sources;
   final MeterService? service;
 
   bool get isManual => deliveryMode == 'manual';
+
+  /// The second source, when the tenant can buy units for it.
+  PowerSource? get prepaidSourceB {
+    for (final s in sources) {
+      if (s.key == 'b' && s.prepaid) return s;
+    }
+    return null;
+  }
+
   String get displayName => (firstName?.isNotEmpty ?? false) ? firstName! : 'there';
   String get fullName => [firstName, lastName].where((s) => s != null && s.isNotEmpty).join(' ');
 }
@@ -185,6 +229,7 @@ class Landlord {
       address = j['address'] as String?,
       bank = j['bank'] == null ? null : BankAccount.fromJson(Map<String, dynamic>.from(j['bank'] as Map)),
       unitPrice = _d(j['unitPrice']) ?? 0,
+      unitPriceB = _d(j['unitPriceB']) ?? 0,
       feeBearer = j['feeBearer'] as String? ?? 'tenant',
       maxUnitPrice = _d((j['tariffLimits'] as Map?)?['max']) ?? 0,
       baseCost = _d((j['tariffLimits'] as Map?)?['baseCost']) ?? 0,
@@ -204,6 +249,9 @@ class Landlord {
   final String? address;
   final BankAccount? bank;
   final double unitPrice;
+
+  /// Price per kWh on the second power source of dual-source meters (0 = not set).
+  final double unitPriceB;
   final String feeBearer;
   final double maxUnitPrice;
   final double baseCost;
@@ -234,6 +282,8 @@ class Meter {
       debtRecoveryPercent = _d(j['debtRecoveryPercent']) ?? 0,
       relayState = j['relayState'] as String? ?? 'connected',
       deliveryMode = j['deliveryMode'] as String? ?? 'ota',
+      dualSource = j['dualSource'] as bool? ?? false,
+      sources = PowerSource.listFrom(j['sources']),
       service = MeterService.from(j['service']);
 
   final String meterId;
@@ -250,7 +300,12 @@ class Meter {
   final double debtRecoveryPercent;
   final String relayState;
   final String deliveryMode;
+  final bool dualSource;
+  final List<PowerSource> sources;
   final MeterService? service;
+
+  PowerSource get sourceA => sources.firstWhere((s) => s.key == 'a', orElse: () => const PowerSource(key: 'a', label: 'Grid', prepaid: true));
+  PowerSource get sourceB => sources.firstWhere((s) => s.key == 'b', orElse: () => const PowerSource(key: 'b', label: 'Generator', prepaid: false));
 
   bool get isManual => deliveryMode == 'manual';
   bool get isOff => relayState.startsWith('disconnect');
@@ -296,6 +351,34 @@ class UsagePoint {
   final double? kwh;
 }
 
+/// One power source's share of a usage report (dual-source meters).
+class UsageSource {
+  UsageSource.fromJson(Map<String, dynamic> j)
+    : key = j['key'] as String,
+      label = j['label'] as String? ?? '',
+      prepaid = j['prepaid'] as bool? ?? true,
+      unitPrice = _d(j['unitPrice']) ?? 0,
+      points = [
+        for (final p in (j['points'] as List)) UsagePoint(p['label'] as String, (p['kwh'] as num?)?.toDouble()),
+      ],
+      totalKwh = _d(j['totalKwh']) ?? 0,
+      totalCost = _d(j['totalCost']) ?? 0,
+      avgUsageKwh = _d(j['avgUsageKwh']) ?? 0,
+      avgCost = _d(j['avgCost']) ?? 0,
+      avgUsageChangePct = _d(j['avgUsageChangePct']);
+
+  final String key;
+  final String label;
+  final bool prepaid;
+  final double unitPrice;
+  final List<UsagePoint> points;
+  final double totalKwh;
+  final double totalCost;
+  final double avgUsageKwh;
+  final double avgCost;
+  final double? avgUsageChangePct;
+}
+
 class UsageReport {
   UsageReport.fromJson(Map<String, dynamic> j)
     : period = j['period'] as String,
@@ -312,9 +395,17 @@ class UsageReport {
       avgCostChangePct = _d(j['avgCostChangePct']),
       previousTotalKwh = _d(j['previousTotalKwh']) ?? 0,
       projectedNextKwh = _d(j['projectedNextKwh']) ?? 0,
+      sources = [
+        for (final s in (j['sources'] as List? ?? const [])) UsageSource.fromJson(Map<String, dynamic>.from(s as Map)),
+      ],
       note = j['note'] as String? ?? '';
 
   final String period;
+
+  /// Per-source breakdown on dual-source meters (empty otherwise). The top-level
+  /// points and totals are the two sources added together.
+  final List<UsageSource> sources;
+  bool get isDual => sources.length == 2;
 
   /// 'meter' (consumption readings) or 'purchases' (manual-token meters).
   final String source;
