@@ -149,3 +149,39 @@ test('turning dual-source off falls back to one source and the single tariff', a
   const r = await api.call('GET', '/v1/tenant/usage?period=week', { token: t });
   assert.equal(r.body.sources, undefined);
 });
+
+test('admins (account owners) can switch a meter’s second source; editors cannot', async () => {
+  const { hashPassword } = await import('../src/auth/password.js');
+  for (const [email, role] of [['owner-admin@example.com', 'owner'], ['editor-admin@example.com', 'editor']]) {
+    await db().run('INSERT INTO staff (email, name, role, password_hash) VALUES (?, ?, ?, ?)', email, role, role, await hashPassword('admin-pass-123'));
+  }
+  const login = async (email) => (await api.call('POST', '/v1/staff/login', { body: { email, password: 'admin-pass-123' } })).body.token;
+  const adminToken = await login('owner-admin@example.com');
+  const editorToken = await login('editor-admin@example.com');
+  assert.ok(adminToken && editorToken);
+
+  const meterId = '47002000003';
+  const add = await addMeter(meterId);
+  assert.equal(add.status, 201, add.text);
+
+  const denied = await api.call('PATCH', `/v1/staff/meters/${meterId}`, { token: editorToken, body: { dualSource: true } });
+  assert.equal(denied.status, 403);
+
+  const on = await api.call('PATCH', `/v1/staff/meters/${meterId}`, { token: adminToken, body: { dualSource: true, sourceBLabel: 'Solar' } });
+  assert.equal(on.status, 200, on.text);
+  assert.equal(on.body.meter.dualSource, true);
+  assert.equal(on.body.meter.sources[1].label, 'Solar');
+  assert.ok(geni().accounts.get(meterId).tariffIdB, 'account points at the second tariff');
+  const note = await db().get("SELECT title FROM notifications WHERE recipient_type = 'landlord' AND title = 'Meter power sources updated'");
+  assert.ok(note, 'owner was told');
+
+  const noPrice = await api.call('PATCH', `/v1/staff/meters/${meterId}`, { token: adminToken, body: { sourceBPrepaid: true } });
+  assert.equal(noPrice.status, 200, 'owner has a second price set by earlier tests');
+  await db().run("UPDATE landlords SET unit_price_b_kobo = 0 WHERE email = 'dual@example.com'");
+  const blocked = await api.call('PATCH', `/v1/staff/meters/${meterId}`, { token: adminToken, body: { sourceBPrepaid: true } });
+  assert.equal(blocked.status, 400);
+
+  const off = await api.call('PATCH', `/v1/staff/meters/${meterId}`, { token: adminToken, body: { dualSource: false } });
+  assert.equal(off.body.meter.dualSource, false);
+  assert.equal(geni().accounts.get(meterId).tariffIdB, undefined);
+});

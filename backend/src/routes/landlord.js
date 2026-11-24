@@ -10,7 +10,7 @@ import { geni } from '../geni/index.js';
 import { payments } from '../providers/payments.js';
 import { codeEmail, inviteEmail, maskEmail, sendEmail } from '../providers/email.js';
 import { listNotifications, markAllRead, notify, unreadCount } from '../services/notifications.js';
-import { getGeniSettings, getTariffSettings } from '../services/settings.js';
+import { getTariffSettings } from '../services/settings.js';
 import { billedUntilAfterChange, SERVICE_PAYERS } from '../services/service-charge.js';
 import { refreshMeter, syncDeliveries, syncRelay } from '../services/meter-sync.js';
 import { liveReading } from '../services/usage.js';
@@ -18,46 +18,14 @@ import { createPurchase, getPurchase, landlordPurchaseDto, settlePayment, vend }
 import { badRequest, conflict, notFound, upstream } from '../util/errors.js';
 import { koboToNaira, nairaToKobo, pageParams, parse } from '../util/http.js';
 import { normalizePhone } from '../util/phone.js';
+import { applyDualSource, checkPrepaidB, dualSourceFields } from '../services/dual-source.js';
+import { syncTariff, syncTariffB } from '../services/head-end-tariffs.js';
 import { landlordDto, meterDto, ownerSetup } from './dto.js';
 
 export const landlordRoutes = Router();
 landlordRoutes.use(requireLandlord());
 
 const reload = (id) => db().get('SELECT * FROM landlords WHERE id = ?', id);
-// A stored tariff_id always wins, so landlords created before prefixes existed keep theirs.
-const tariffIdFor = (landlord, prefix) => landlord.tariff_id ?? `${prefix}${String(landlord.id).padStart(6, '0')}`;
-
-/** Make sure the landlord's tariff exists on the head-end with their price. */
-async function syncTariff(landlord) {
-  const tariffId = tariffIdFor(landlord, (await getGeniSettings()).tariffPrefix);
-  const { baseUnitCostNaira } = await getTariffSettings();
-  const price = koboToNaira(landlord.unit_price_kobo || Math.round(baseUnitCostNaira * 100));
-  await geni().upsertTariff({ tariffId, tariffName: `${landlord.full_name} (smeter)`.slice(0, 60), price, tax: 0 });
-  if (!landlord.tariff_id) await db().run('UPDATE landlords SET tariff_id = ? WHERE id = ?', tariffId, landlord.id);
-  return tariffId;
-}
-
-/**
- * Source B's price on the head-end: the owner's second tariff, used as the
- * account's second-rate (S2) tariff on dual-source meters. Falls back to the
- * source A price until the owner sets one.
- */
-async function syncTariffB(landlord) {
-  const tariffId = landlord.tariff_id_b ?? `${tariffIdFor(landlord, (await getGeniSettings()).tariffPrefix)}B`;
-  const { baseUnitCostNaira } = await getTariffSettings();
-  const price = koboToNaira(landlord.unit_price_b_kobo || landlord.unit_price_kobo || Math.round(baseUnitCostNaira * 100));
-  await geni().upsertTariff({ tariffId, tariffName: `${landlord.full_name} source B (smeter)`.slice(0, 60), price, tax: 0 });
-  if (!landlord.tariff_id_b) await db().run('UPDATE landlords SET tariff_id_b = ? WHERE id = ?', tariffId, landlord.id);
-  return tariffId;
-}
-
-/** A source B that is sold prepaid needs a dual-source meter and a price for it. */
-function checkPrepaidB(landlord, dual, prepaid) {
-  if (!prepaid) return;
-  if (!dual) throw badRequest('Turn on the second power source before selling it prepaid');
-  if (!(landlord.unit_price_b_kobo > 0)) throw badRequest('Set a price per kWh for the second source first', { sourceBPrepaid: 'Set the second source price first' });
-}
-
 async function ownedMeter(landlord, meterId) {
   const meter = await db().get(
     "SELECT * FROM meters WHERE meter_id = ? AND landlord_id = ? AND status != 'removed'",
@@ -343,15 +311,6 @@ landlordRoutes.get('/meters', async (req, res) => {
   res.json({ meters: meters.map(meterDto) });
 });
 
-// Dual-source meters: our accessory meters a second power source separately.
-const sourceLabel = z.string().trim().min(1).max(24);
-const dualSourceFields = {
-  dualSource: z.boolean().optional(),
-  sourceALabel: sourceLabel.optional(),
-  sourceBLabel: sourceLabel.optional(),
-  sourceBPrepaid: z.boolean().optional(),
-};
-
 const meterBody = z.object({
   meterId: z.string().trim().regex(/^\d{6,20}$/, 'Enter the serial number printed on the meter'),
   address: z.string().trim().min(3, 'Enter the property address').max(240),
@@ -489,28 +448,7 @@ landlordRoutes.patch('/meters/:meterId', async (req, res) => {
     }),
     req.body,
   );
-  const dual = body.dualSource ?? Boolean(meter.dual_source);
-  const prepaidB = dual && (body.sourceBPrepaid ?? Boolean(meter.source_b_prepaid));
-  checkPrepaidB(req.landlord, dual, body.sourceBPrepaid ?? (body.dualSource ? false : undefined));
-  if (body.dualSource !== undefined && dual !== Boolean(meter.dual_source)) {
-    // Point the account's second-rate tariff at source B's (or back at source A's).
-    try {
-      const client = geni();
-      const account = await client.getAccount(meter.meter_id);
-      if (account) {
-        const tariffId = await syncTariff(req.landlord);
-        const tariffIdB = dual ? await syncTariffB(req.landlord) : undefined;
-        await client.bindAccount({ customerId: meter.customer_id, meterId: meter.meter_id, region: meter.address.slice(0, 60), tariffId, tariffIdB }, account);
-      }
-    } catch (err) {
-      throw asUpstream(err);
-    }
-  }
-  await db().run(
-    `UPDATE meters SET dual_source = ?, source_a_label = COALESCE(?, source_a_label),
-       source_b_label = COALESCE(?, source_b_label), source_b_prepaid = ? WHERE id = ?`,
-    dual, body.sourceALabel ?? null, body.sourceBLabel ?? null, prepaidB, meter.id,
-  );
+  await applyDualSource({ meter, landlord: req.landlord, body });
   await db().run(
     `UPDATE meters SET address = COALESCE(?, address), apartment = COALESCE(?, apartment),
        debt_kobo = COALESCE(?, debt_kobo), debt_recovery_percent = COALESCE(?, debt_recovery_percent),

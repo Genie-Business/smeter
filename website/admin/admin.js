@@ -418,8 +418,44 @@ async function meterDetail(main, meterId) {
       <div style="flex:1;min-width:220px"><h2 style="margin:0">Tamper alarm</h2><p class="muted" style="margin:4px 0 0">${tamper.length ? html`Last tamper token: <span class="mono">${fmtToken(tamper[0].token)}</span>, ${dateTime(tamper[0].createdAt)} by ${tamper[0].by || 'unknown'}` : 'No tamper tokens generated for this meter yet.'}</p></div>
       ${me.role === 'owner' ? html`<a class="btn" href="#/tamper-tokens?meter=${m.meterId}">${icon('shield')} Generate tamper token</a>` : ''}
     </div></div>
+    <div class="card" style="margin-top:14px"><h2 style="margin:0 0 6px">Power sources</h2>
+      <div id="src-err"></div>
+      ${me.role === 'owner' && m.status !== 'removed' ? html`<form id="src" novalidate>
+        <label class="check"><input type="checkbox" id="src-dual" ${m.dualSource ? raw('checked') : ''}> Two power sources (meter accessory fitted)</label>
+        <div id="src-more" ${m.dualSource ? '' : raw('hidden')}>
+          <div class="grid g2"><div class="field"><label for="src-a">Main supply name</label><input class="input" id="src-a" maxlength="24" value="${m.sources[0].label}"></div>
+          <div class="field"><label for="src-b">Second source name</label><input class="input" id="src-b" maxlength="24" value="${m.dualSource ? m.sources[1].label : 'Generator'}"></div></div>
+          <label class="check"><input type="checkbox" id="src-prepaid" ${m.dualSource && m.sources[1].prepaid ? raw('checked') : ''}> Sell the second source as prepaid units (needs a second price set by the owner)</label>
+        </div>
+        <button class="btn primary" type="submit" style="margin-top:10px">Save power sources</button></form>`
+        : html`<p class="muted" style="margin:4px 0 0">${m.dualSource ? m.sources.map((s) => `${s.label}${s.prepaid ? ' (prepaid)' : ' (metered only)'}`).join(' + ') : 'One power source.'}${me.role === 'owner' ? '' : ' Only account owners can change this.'}</p>`}
+    </div>
     <h2 style="margin:22px 0 10px;font-size:17px">Purchases</h2>
     <div class="table-wrap"><table><thead>${purchaseHead(false)}</thead><tbody>${purchaseRows(r.purchases, { showMeter: false })}</tbody></table></div>`);
+  const src = main.querySelector('#src');
+  if (src) {
+    const dual = src.querySelector('#src-dual');
+    dual.onchange = () => { src.querySelector('#src-more').hidden = !dual.checked; };
+    src.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = src.querySelector('button[type=submit]');
+      btn.disabled = true;
+      render(main.querySelector('#src-err'), html``);
+      const body = { dualSource: dual.checked };
+      if (dual.checked) {
+        body.sourceALabel = src.querySelector('#src-a').value.trim() || 'Grid';
+        body.sourceBLabel = src.querySelector('#src-b').value.trim() || 'Generator';
+      }
+      body.sourceBPrepaid = dual.checked && src.querySelector('#src-prepaid').checked;
+      try {
+        await api(`/meters/${encodeURIComponent(m.meterId)}`, { method: 'PATCH', body });
+        await meterDetail(main, m.meterId);
+      } catch (err) {
+        render(main.querySelector('#src-err'), html`<div class="err-box">${err.message}</div>`);
+        btn.disabled = false;
+      }
+    };
+  }
 }
 
 // Clear-tamper tokens

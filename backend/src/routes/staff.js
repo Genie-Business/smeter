@@ -16,6 +16,7 @@ import {
 } from '../services/settings.js';
 import { asUpstream, GeniClient } from '../geni/client.js';
 import { geni, geniMode, refreshGeni } from '../geni/index.js';
+import { applyDualSource, dualSourceFields } from '../services/dual-source.js';
 import { notify } from '../services/notifications.js';
 import { liveReading } from '../services/usage.js';
 import { landlordPurchaseDto } from '../services/vending.js';
@@ -241,6 +242,26 @@ staffRoutes.get('/meters/:meterId', async (req, res) => {
     live,
     purchases: purchases.map(landlordPurchaseDto),
   });
+});
+
+// Turn a meter's second power source on or off for an owner (account owners only:
+// it changes what the meter is billed and sold at).
+staffRoutes.patch('/meters/:meterId', requireStaff({ role: 'owner' }), async (req, res) => {
+  const meter = await db().get("SELECT * FROM meters WHERE meter_id = ? AND status != 'removed'", req.params.meterId);
+  if (!meter) throw notFound('Meter not found');
+  const body = parse(z.object(dualSourceFields), req.body);
+  const landlord = await db().get('SELECT * FROM landlords WHERE id = ?', meter.landlord_id);
+  const updated = await applyDualSource({ meter, landlord, body });
+  const changed = Boolean(updated.dual_source) !== Boolean(meter.dual_source)
+    || Boolean(updated.source_b_prepaid) !== Boolean(meter.source_b_prepaid);
+  if (changed) {
+    await notify({
+      recipientType: 'landlord', recipientId: landlord.id, kind: 'meter',
+      title: 'Meter power sources updated',
+      body: `smeter support ${updated.dual_source ? 'set up two power sources' : 'switched off the second power source'} on meter ${meter.meter_id}.`,
+    });
+  }
+  res.json({ meter: meterDto(updated) });
 });
 
 staffRoutes.get('/purchases', async (req, res) => {
